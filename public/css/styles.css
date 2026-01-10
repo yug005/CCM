@@ -26,6 +26,25 @@ body {
   touch-action: pan-y;
 }
 
+/* Small fixed credit */
+.made-by {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 10000;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--color-light);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  user-select: none;
+  pointer-events: none;
+}
+
 /* Loading screen */
 .loading-screen {
   position: fixed;
