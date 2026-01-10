@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>UNO Multiplayer</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <!-- Loading screen -->
+  <div id="loadingScreen" class="loading-screen">
+    <div class="loading-content">
+      <div class="loading-cards">
+        <div class="loading-card red"></div>
+        <div class="loading-card blue"></div>
+        <div class="loading-card green"></div>
+        <div class="loading-card yellow"></div>
+      </div>
+      <h2>Loading UNO...</h2>
+      <div class="loading-bar">
+        <div class="loading-progress"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="header">
+      <h1>🎴 UNO Multiplayer</h1>
+      <p>Play with friends in real-time!</p>
+    </div>
+
+    <div id="homeScreen" class="screen active">
+      <div class="card">
+        <h2>Join or Create a Game</h2>
+        
+        <div class="form-group">
+          <label for="playerName">Your Name</label>
+          <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
+        </div>
+
+        <div class="button-group">
+          <button id="createRoomBtn" class="btn btn-primary">Create Room</button>
+        </div>
+
+        <div class="divider">OR</div>
+
+        <div class="form-group">
+          <label for="roomCode">Room Code</label>
+          <input type="text" id="roomCode" placeholder="Enter 6-digit code" maxlength="6" style="text-transform: uppercase;">
+        </div>
+
+        <button id="joinRoomBtn" class="btn btn-secondary">Join Room</button>
+
+        <div id="settingsToggle" class="settings-toggle">
+          <button class="btn-text">⚙️ Game Settings</button>
+        </div>
+
+        <div id="settingsPanel" class="settings-panel" style="display: none;">
+          <h3>Game Variations</h3>
+          <label class="checkbox-label">
+            <input type="checkbox" id="stackPlusTwoFour">
+            <span>Allow stacking +2/+4 cards</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="sevenZeroRule">
+            <span>7-0 Rule (7=swap hands, 0=rotate)</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="jumpInRule">
+            <span>Jump-in (play same card out of turn)</span>
+          </label>
+        </div>
+      </div>
+
+      <div id="errorMessage" class="error-message"></div>
+    </div>
+
+    <div id="lobbyScreen" class="screen">
+      <div class="card">
+        <h2>Waiting for Players...</h2>
+        
+        <div class="room-info">
+          <div class="room-code-display">
+            <span>Room Code:</span>
+            <strong id="displayRoomCode">------</strong>
+            <button id="copyCodeBtn" class="btn-icon" title="Copy code">📋</button>
+          </div>
+        </div>
+
+        <div id="playersList" class="players-list">
+          <!-- Players will be added dynamically -->
+        </div>
+
+        <div class="lobby-actions">
+          <button id="startGameBtn" class="btn btn-primary">Start Game</button>
+          <button id="leaveLobbyBtn" class="btn btn-secondary">Leave</button>
+        </div>
+
+        <div class="game-settings-display" id="gameSettingsDisplay">
+          <!-- Settings will be displayed here -->
+        </div>
+      </div>
+    </div>
+
+    <div id="gameScreen" class="screen">
+      <!-- Game info bar -->
+      <div class="game-info-bar">
+        <div class="room-code-small">
+          Room: <span id="gameRoomCode">------</span>
+        </div>
+        <div class="deck-info">
+          <span id="deckCount">52</span> cards left
+        </div>
+      </div>
+
+      <!-- Other players display -->
+      <div id="otherPlayers" class="other-players">
+        <!-- Other players will be shown here -->
+      </div>
+
+      <!-- Game table (center area) -->
+      <div class="game-table">
+        <div class="deck-area">
+          <div class="deck-pile" id="deckPile">
+            <div class="card-back">UNO</div>
+          </div>
+          <div class="discard-pile" id="discardPile">
+            <!-- Top card shown here -->
+          </div>
+        </div>
+
+        <div class="current-color-indicator" id="colorIndicator">
+          <!-- Shows current color -->
+        </div>
+
+        <div id="turnIndicator" class="turn-indicator">
+          Waiting for game to start...
+        </div>
+      </div>
+
+      <!-- Current player's hand -->
+      <div class="player-area">
+        <div id="playerHand" class="player-hand">
+          <!-- Player's cards will be shown here -->
+        </div>
+        
+        <div class="player-actions">
+          <button id="drawCardBtn" class="btn btn-action">Draw Card</button>
+          <button id="sayUnoBtn" class="btn btn-uno">Say UNO!</button>
+        </div>
+      </div>
+
+      <!-- Color picker modal -->
+      <div id="colorPickerModal" class="modal">
+        <div class="modal-content">
+          <h3>Choose a Color</h3>
+          <div class="color-picker">
+            <button class="color-btn red" data-color="red">Red</button>
+            <button class="color-btn blue" data-color="blue">Blue</button>
+            <button class="color-btn green" data-color="green">Green</button>
+            <button class="color-btn yellow" data-color="yellow">Yellow</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Game Over modal -->
+      <div id="gameOverModal" class="modal">
+        <div class="modal-content">
+          <h2>🎉 Game Over!</h2>
+          <div id="gameOverContent">
+            <!-- Winner/loser info -->
+          </div>
+          <button id="playAgainBtn" class="btn btn-primary">Play Again</button>
+          <button id="leaveGameBtn" class="btn btn-secondary">Leave</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/client.js"></script>
+</body>
+</html>
