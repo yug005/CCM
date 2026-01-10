@@ -216,25 +216,52 @@ socket.on('roomJoined', ({ roomCode, playerId, playerName }) => {
 });
 
 socket.on('gameState', (state) => {
+  console.log('📊 Received game state:', state);
   updateGameState(state);
+  
+  // Re-render cards after game state update if we have cards
+  if (gameState.currentHand && gameState.currentHand.length > 0) {
+    console.log('Re-rendering cards after gameState update');
+    renderPlayerHand(state);
+  }
 });
 
 socket.on('playerHand', (hand) => {
-  console.log('Received player hand:', hand);
+  console.log('✅ Received player hand:', hand);
+  console.log('Hand length:', hand ? hand.length : 0);
+  console.log('Game screen active:', gameScreen ? gameScreen.classList.contains('active') : false);
+  
   gameState.currentHand = hand;
-  if (gameScreen.classList.contains('active')) {
+  
+  // Always try to render if we have the game state
+  if (gameState.lastTopCard || gameState.lastCurrentColor) {
     const state = { 
       topCard: gameState.lastTopCard, 
       currentColor: gameState.lastCurrentColor,
       currentPlayerId: gameState.lastCurrentPlayerId 
     };
+    console.log('Rendering with state:', state);
     renderPlayerHand(state);
+  } else {
+    console.log('⚠️ Waiting for gameState before rendering cards');
   }
 });
 
 socket.on('gameStarted', () => {
-  console.log('Game started!');
+  console.log('🎮 Game started!');
   showScreen('gameScreen');
+  
+  // Trigger card render after screen shows if we already have cards
+  setTimeout(() => {
+    if (gameState.currentHand && gameState.currentHand.length > 0) {
+      console.log('Rendering cards after game start');
+      renderPlayerHand({
+        topCard: gameState.lastTopCard,
+        currentColor: gameState.lastCurrentColor,
+        currentPlayerId: gameState.lastCurrentPlayerId
+      });
+    }
+  }, 100);
 });
 
 socket.on('playersUpdate', (players) => {
@@ -392,24 +419,31 @@ function updateGameState(state) {
         otherPlayers.appendChild(playerDiv);
       }
     });
+  }🎴 renderPlayerHand called');
+  console.log('  - Cards in hand:', gameState.currentHand ? gameState.currentHand.length : 0);
+  console.log('  - State:', state);
+  console.log('  - playerHand element:', playerHand ? 'exists' : 'NULL');
+  
+  if (!playerHand) {
+    console.error('❌ playerHand element not found!');
+    return;
   }
   
-  // Render player hand
-  renderPlayerHand(state);
-}
-
-function renderPlayerHand(state) {
-  console.log('renderPlayerHand called, cards:', gameState.currentHand.length, 'state:', state);
-  if (!playerHand) {
-    console.error('playerHand element not found!');
+  if (!gameState.currentHand || gameState.currentHand.length === 0) {
+    console.log('⚠️ No cards to render');
+    playerHand.innerHTML = '<div style="color: white; text-align: center;">No cards</div>';
     return;
   }
   
   playerHand.innerHTML = '';
+  console.log('Rendering', gameState.currentHand.length, 'cards...');
+  
   gameState.currentHand.forEach((card, index) => {
     const cardDiv = document.createElement('div');
     const colorClass = card.color === 'wild' ? 'black' : card.color;
     cardDiv.className = `uno-card ${colorClass}`;
+    
+    console.log(`  Card ${index}:`, card.color, card.value);
     
     // Add card content
     cardDiv.innerHTML = `
@@ -424,6 +458,14 @@ function renderPlayerHand(state) {
         cardDiv.classList.add('playable');
         cardDiv.addEventListener('click', () => playCard(index, card));
       } else {
+        cardDiv.classList.add('unplayable');
+      }
+    }
+    
+    playerHand.appendChild(cardDiv);
+  });
+  
+  console.log('✅ Cards rendered! DOM
         cardDiv.classList.add('unplayable');
       }
     }
