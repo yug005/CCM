@@ -6,7 +6,12 @@ const Game = require('./gameLogic');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
+const io = socketIo(server, {
+  cors: {
+    origin: process.env.CORS_ORIGIN || '*',
+    methods: ['GET', 'POST']
+  }
+});
 
 // Serve static files
 app.use(express.static('public'));
@@ -50,17 +55,17 @@ io.on('connection', (socket) => {
     const game = rooms.get(roomCode);
     
     if (!game) {
-      socket.emit('error', { message: 'Room not found' });
+      socket.emit('gameError', { message: 'Room not found' });
       return;
     }
     
     if (game.hasStarted) {
-      socket.emit('error', { message: 'Game already started' });
+      socket.emit('gameError', { message: 'Game already started' });
       return;
     }
     
     if (game.players.length >= 6) {
-      socket.emit('error', { message: 'Room is full' });
+      socket.emit('gameError', { message: 'Room is full' });
       return;
     }
     
@@ -87,7 +92,7 @@ io.on('connection', (socket) => {
     if (!game) return;
     
     if (game.players.length < 2) {
-      socket.emit('error', { message: 'Need at least 2 players to start' });
+      socket.emit('gameError', { message: 'Need at least 2 players to start' });
       return;
     }
     
@@ -103,8 +108,33 @@ io.on('connection', (socket) => {
       
       console.log(`Game started in room ${playerData.roomCode}`);
     } catch (error) {
-      socket.emit('error', { message: error.message });
+      socket.emit('gameError', { message: error.message });
     }
+  });
+
+  // Leave room (without disconnect)
+  socket.on('leaveRoom', () => {
+    const playerData = players.get(socket.id);
+    if (!playerData) return;
+
+    const game = rooms.get(playerData.roomCode);
+    if (game) {
+      game.removePlayer(socket.id);
+      socket.leave(playerData.roomCode);
+
+      if (game.players.length === 0) {
+        rooms.delete(playerData.roomCode);
+        console.log(`Room ${playerData.roomCode} closed`);
+      } else {
+        io.to(playerData.roomCode).emit('gameState', game.getGameState());
+        io.to(playerData.roomCode).emit('playerLeft', {
+          playerId: socket.id,
+          playerName: playerData.playerName
+        });
+      }
+    }
+
+    players.delete(socket.id);
   });
 
   // Play a card
@@ -117,6 +147,9 @@ io.on('connection', (socket) => {
     
     try {
       const result = game.playCard(socket.id, cardIndex, chosenColor);
+
+      // Clear any pending draw/pass state on the acting client.
+      socket.emit('drawOption', { canPlayDrawnCard: false, drawnCardIndex: null });
       
       // Send game state to all players
       io.to(playerData.roomCode).emit('gameState', game.getGameState());
@@ -151,7 +184,7 @@ io.on('connection', (socket) => {
       }
       
     } catch (error) {
-      socket.emit('error', { message: error.message });
+      socket.emit('gameError', { message: error.message });
     }
   });
 
@@ -164,18 +197,43 @@ io.on('connection', (socket) => {
     if (!game) return;
     
     try {
-      game.drawCard(socket.id);
+      const drawResult = game.drawCard(socket.id);
+
       io.to(playerData.roomCode).emit('gameState', game.getGameState());
-      
-      // Send updated hand to the player who drew
+
+      // Send updated hand + draw option to the player who drew
       socket.emit('playerHand', game.getPlayerHand(socket.id));
+      socket.emit('drawOption', {
+        canPlayDrawnCard: !!(drawResult && drawResult.canPlayDrawnCard),
+        drawnCardIndex: drawResult && typeof drawResult.drawnCardIndex === 'number' ? drawResult.drawnCardIndex : null
+      });
       
       io.to(playerData.roomCode).emit('cardDrawn', {
         playerId: socket.id,
         playerName: playerData.playerName
       });
     } catch (error) {
-      socket.emit('error', { message: error.message });
+      socket.emit('gameError', { message: error.message });
+    }
+  });
+
+  // Pass turn after drawing a playable card
+  socket.on('passTurn', () => {
+    const playerData = players.get(socket.id);
+    if (!playerData) return;
+
+    const game = rooms.get(playerData.roomCode);
+    if (!game) return;
+
+    try {
+      game.passTurnAfterDraw(socket.id);
+
+      // Clear any pending draw/pass state on the acting client.
+      socket.emit('drawOption', { canPlayDrawnCard: false, drawnCardIndex: null });
+
+      io.to(playerData.roomCode).emit('gameState', game.getGameState());
+    } catch (error) {
+      socket.emit('gameError', { message: error.message });
     }
   });
 
@@ -186,12 +244,17 @@ io.on('connection', (socket) => {
     
     const game = rooms.get(playerData.roomCode);
     if (!game) return;
-    
-    game.sayUno(socket.id);
-    io.to(playerData.roomCode).emit('unoSaid', {
-      playerId: socket.id,
-      playerName: playerData.playerName
-    });
+
+    try {
+      game.sayUno(socket.id);
+      io.to(playerData.roomCode).emit('unoSaid', {
+        playerId: socket.id,
+        playerName: playerData.playerName
+      });
+      io.to(playerData.roomCode).emit('gameState', game.getGameState());
+    } catch (error) {
+      socket.emit('gameError', { message: error.message });
+    }
   });
 
   // Challenge UNO (when someone forgets to say UNO)
@@ -205,15 +268,24 @@ io.on('connection', (socket) => {
     try {
       const penalized = game.challengeUno(targetPlayerId);
       if (penalized) {
+        const targetPlayer = game.players.find(p => p.id === targetPlayerId);
         io.to(playerData.roomCode).emit('unoChallenged', {
           challengerId: socket.id,
           challengerName: playerData.playerName,
-          targetId: targetPlayerId
+          targetId: targetPlayerId,
+          targetName: targetPlayer ? targetPlayer.name : undefined,
+          penaltyCount: 4
         });
+
         io.to(playerData.roomCode).emit('gameState', game.getGameState());
+
+        // Send updated hands (penalty affects only target, but keep clients consistent)
+        game.players.forEach(player => {
+          io.to(player.id).emit('playerHand', game.getPlayerHand(player.id));
+        });
       }
     } catch (error) {
-      socket.emit('error', { message: error.message });
+      socket.emit('gameError', { message: error.message });
     }
   });
 

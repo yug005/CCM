@@ -264,7 +264,23 @@ body {
 
 .btn-primary {
   background: linear-gradient(135deg, var(--color-blue) 0%, #2980b9 100%);
-  color: whitelinear-gradient(135deg, var(--color-green) 0%, #27ae60 100%);
+  color: white;
+  flex: 1;
+  margin: 0 5px;
+  box-shadow: 0 4px 15px rgba(52, 152, 219, 0.35);
+}
+
+.btn-primary:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 20px rgba(52, 152, 219, 0.5);
+}
+
+.btn-primary:active {
+  transform: translateY(-1px);
+}
+
+.btn-action {
+  background: linear-gradient(135deg, var(--color-green) 0%, #27ae60 100%);
   color: white;
   flex: 1;
   margin: 0 5px;
@@ -294,15 +310,7 @@ body {
   50% { 
     transform: scale(1.05);
     box-shadow: 0 6px 20px rgba(231, 76, 60, 0.6);
- 
-  opacity: 0.5
-.btn-primary:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 6px 20px rgba(52, 152, 219, 0.5);
-}
-
-.btn-primary:active {
-  transform: translateY(-1px);
+  }
 }
 
 .btn-secondary {
@@ -313,26 +321,6 @@ body {
 
 .btn-secondary:hover {
   background: rgba(255,255,255,0.2);
-}
-
-.btn-action {
-  background: var(--color-green);
-  color: white;
-  flex: 1;
-  margin: 0 5px;
-}
-
-.btn-uno {
-  background: var(--color-red);
-  color: white;
-  flex: 1;
-  margin: 0 5px;
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.05); }
 }
 
 .btn-text {
@@ -507,6 +495,11 @@ body {
   font-weight: 600;
 }
 
+/* User preference: hide remaining deck size */
+.deck-info {
+  display: none;
+}
+
 /* Other players */
 .other-players {
   display: flex;
@@ -517,6 +510,22 @@ body {
   min-height: 80px;
 }
 
+.turn-order {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.turn-arrow {
+  opacity: 0.7;
+  font-size: 18px;
+  font-weight: 800;
+  user-select: none;
+}
+
 .other-player {
   background: rgba(255,255,255,0.1);
   border-radius: 10px;
@@ -524,6 +533,10 @@ body {
   min-width: 120px;
   text-align: center;
   position: relative;
+}
+
+.other-player.me {
+  border: 2px solid rgba(255,255,255,0.35);
 }
 
 .other-player.active-turn {
@@ -562,6 +575,27 @@ body {
   border-radius: 10px;
   font-size: 10px;
   font-weight: 600;
+}
+
+.other-player .uno-badge.uno-ok {
+  background: var(--color-green);
+}
+
+.catch-btn {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  font-weight: 800;
+  font-size: 12px;
+  cursor: pointer;
+  background: var(--color-red);
+  color: white;
+  width: 100%;
+}
+
+.catch-btn:active {
+  transform: scale(0.98);
 }
 
 /* Game table */
@@ -638,6 +672,7 @@ body {
   100% {
     transform: translate(50%, 50%);
   }
+}
 
 .card-back {
   width: 100%;
@@ -725,6 +760,62 @@ body {
   position: relative;
   user-select: none;
   transform-origin: center bottom;
+  overflow: hidden;
+}
+
+.uno-card::before {
+  content: '';
+  position: absolute;
+  top: 14px;
+  left: 10px;
+  right: 10px;
+  bottom: 14px;
+  border-radius: 50% 55%;
+  transform: rotate(-14deg);
+  background: rgba(255,255,255,0.15);
+  box-shadow: inset 0 0 0 5px rgba(255,255,255,0.75);
+  z-index: 0;
+}
+
+.uno-card::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
+  z-index: 0;
+}
+
+.uno-card .card-center {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.uno-card .card-corner {
+  position: absolute;
+  z-index: 2;
+  font-weight: 800;
+  font-size: 14px;
+  line-height: 1;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.45);
+  padding: 6px 6px;
+}
+
+.uno-card .card-corner.top-left {
+  top: 2px;
+  left: 2px;
+}
+
+.uno-card .card-corner.bottom-right {
+  bottom: 2px;
+  right: 2px;
+  transform: rotate(180deg);
 }
 
 .uno-card:hover {
@@ -822,12 +913,15 @@ body {
 }
 
 .uno-card .card-value {
-  font-size: 32px;
+  font-size: 26px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
 .uno-card .card-symbol {
-  font-size: 16px;
-  margin-top: 5px;
+  font-size: 18px;
+  margin-top: 6px;
+  opacity: 0.95;
 }
 
 .player-actions {

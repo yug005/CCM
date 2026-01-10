@@ -178,6 +178,11 @@
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script>
+    // Optional: set this when hosting frontend separately (e.g., Vercel) from the Socket.IO backend.
+    // Example: window.SOCKET_SERVER_URL = 'https://your-backend.onrender.com';
+    window.SOCKET_SERVER_URL = window.SOCKET_SERVER_URL || '';
+  </script>
   <script src="/js/client.js"></script>
 </body>
 </html>

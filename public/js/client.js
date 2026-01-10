@@ -1,7 +1,7 @@
 // Client-side Socket.IO logic
 console.log('Client script loaded');
 
-const socket = io();
+const socket = io(window.SOCKET_SERVER_URL || undefined);
 
 socket.on('connect', () => {
   console.log('Connected to server:', socket.id);
@@ -22,12 +22,17 @@ let gameState = {
 
 let pendingWildCard = null;
 
+// Draw-then-play flow: if you draw a playable card, you may play ONLY that drawn card or pass.
+gameState.canPassAfterDraw = false;
+gameState.drawnCardIndex = null;
+
 // DOM elements - initialized after DOM loads
 let homeScreen, lobbyScreen, gameScreen, errorMessage;
 let playerNameInput, roomCodeInput, createRoomBtn, joinRoomBtn;
 let displayRoomCode, gameRoomCode, copyCodeBtn, playersList, startGameBtn, leaveLobbyBtn;
 let otherPlayers, deckPile, discardPile, colorIndicator, turnIndicator, playerHand, deckCount, drawCardBtn, sayUnoBtn;
 let colorPickerModal, gameOverModal, gameOverContent, playAgainBtn, leaveGameBtn;
+let settingsToggle, settingsPanel, gameSettingsDisplay;
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
@@ -59,6 +64,10 @@ document.addEventListener('DOMContentLoaded', function() {
   roomCodeInput = document.getElementById('roomCode');
   createRoomBtn = document.getElementById('createRoomBtn');
   joinRoomBtn = document.getElementById('joinRoomBtn');
+
+  settingsToggle = document.getElementById('settingsToggle');
+  settingsPanel = document.getElementById('settingsPanel');
+  gameSettingsDisplay = document.getElementById('gameSettingsDisplay');
   
   displayRoomCode = document.getElementById('displayRoomCode');
   gameRoomCode = document.getElementById('gameRoomCode');
@@ -90,6 +99,11 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   
   attachEventListeners();
+
+  // Hide deck remaining count display (per UX request)
+  if (deckCount && deckCount.parentElement) {
+    deckCount.parentElement.style.display = 'none';
+  }
 });
 
 function attachEventListeners() {
@@ -101,7 +115,9 @@ function attachEventListeners() {
       return;
     }
     gameState.playerName = playerName;
-    socket.emit('createRoom', { playerName });
+
+    const settings = getSelectedSettings();
+    socket.emit('createRoom', { playerName, settings });
   });
   
   // Join room
@@ -141,8 +157,13 @@ function attachEventListeners() {
   
   // Draw card
   drawCardBtn.addEventListener('click', () => {
+    if (gameState.canPassAfterDraw) {
+      socket.emit('passTurn');
+      return;
+    }
+
     socket.emit('drawCard');
-    
+
     // Add draw animation
     drawCardBtn.classList.add('drawing');
     setTimeout(() => {
@@ -152,8 +173,12 @@ function attachEventListeners() {
   
   // Say UNO
   sayUnoBtn.addEventListener('click', () => {
+    if (!canSayUnoNow()) {
+      showNotification('You can only say UNO on your turn with exactly 2 cards', 'warning');
+      return;
+    }
+
     socket.emit('sayUno');
-    showNotification('You said UNO!', 'success');
   });
 
   // Play again
@@ -193,6 +218,13 @@ function attachEventListeners() {
   playerNameInput.addEventListener('blur', () => {
     localStorage.setItem('unoPlayerName', playerNameInput.value.trim());
   });
+
+  if (settingsToggle && settingsPanel) {
+    settingsToggle.addEventListener('click', () => {
+      const isHidden = settingsPanel.style.display === 'none' || settingsPanel.style.display === '';
+      settingsPanel.style.display = isHidden ? 'block' : 'none';
+    });
+  }
   
   console.log('All event listeners attached');
 }
@@ -232,6 +264,17 @@ socket.on('playerHand', (hand) => {
   
   // FIX: Store hand and render immediately - no waiting for gameState
   gameState.currentHand = hand;
+
+  // If we were in draw-then-play mode but the drawn card no longer exists (e.g. we played it), clear the state.
+  if (
+    gameState.canPassAfterDraw &&
+    (typeof gameState.drawnCardIndex !== 'number' || gameState.drawnCardIndex >= gameState.currentHand.length)
+  ) {
+    gameState.canPassAfterDraw = false;
+    gameState.drawnCardIndex = null;
+  }
+
+  updateActionButtons();
   
   // Build state object (may be incomplete on first render, that's OK)
   const state = { 
@@ -243,6 +286,24 @@ socket.on('playerHand', (hand) => {
   // ALWAYS render cards immediately when they arrive
   console.log('Rendering cards immediately...');
   renderPlayerHand(state);
+});
+
+// After drawing, server tells us whether we can play the drawn card or should pass.
+socket.on('drawOption', ({ canPlayDrawnCard, drawnCardIndex }) => {
+  gameState.canPassAfterDraw = !!canPlayDrawnCard;
+  gameState.drawnCardIndex = (typeof drawnCardIndex === 'number') ? drawnCardIndex : null;
+
+  if (gameState.canPassAfterDraw) {
+    showNotification('You drew a playable card — play it or press Pass', 'info');
+  }
+
+  updateActionButtons();
+  // Re-render to highlight only the drawn card as playable.
+  renderPlayerHand({
+    topCard: gameState.lastTopCard,
+    currentColor: gameState.lastCurrentColor,
+    currentPlayerId: gameState.lastCurrentPlayerId
+  });
 });
 
 socket.on('gameStarted', () => {
@@ -262,17 +323,19 @@ socket.on('gameStarted', () => {
   }, 100);
 });
 
-socket.on('playersUpdate', (players) => {
-  updatePlayersList(players);
-});
-
-socket.on('cardPlayed', ({ playerId, card }) => {
-  showNotification(`${formatCardName(card)} played!`, 'info');
-});
-
-socket.on('cardDrawn', ({ playerId, count }) => {
+socket.on('cardPlayed', ({ playerId, playerName, card }) => {
   if (playerId === gameState.playerId) {
-    showNotification(`You drew ${count} card${count > 1 ? 's' : ''}`, 'info');
+    showNotification(`You played ${formatCardName(card)}`, 'info');
+  } else {
+    showNotification(`${playerName || 'Someone'} played ${formatCardName(card)}`, 'info');
+  }
+});
+
+socket.on('cardDrawn', ({ playerId, playerName }) => {
+  if (playerId === gameState.playerId) {
+    showNotification('You drew a card', 'info');
+  } else {
+    showNotification(`${playerName || 'Someone'} drew a card`, 'info');
   }
 });
 
@@ -284,23 +347,34 @@ socket.on('unoSaid', ({ playerId, playerName }) => {
   }
 });
 
-socket.on('unoChallenged', ({ challengerId, targetId, targetName, success }) => {
-  if (success) {
-    showNotification(`${targetName} was challenged! Drew 2 cards.`, 'warning');
+socket.on('unoChallenged', ({ challengerId, challengerName, targetId, targetName, penaltyCount }) => {
+  const resolvedTargetName = targetName || getPlayerNameById(targetId) || 'a player';
+  const penalty = penaltyCount || 4;
+
+  if (challengerId === gameState.playerId) {
+    showNotification(`${resolvedTargetName} drew ${penalty} cards (caught!)`, 'warning');
   } else {
-    showNotification(`Challenge failed!`, 'info');
+    showNotification(`${challengerName || 'Someone'} caught ${resolvedTargetName}: +${penalty} cards`, 'warning');
   }
 });
 
-socket.on('gameOver', ({ winner, loser, stats }) => {
-  displayGameOver(loser, stats);
+socket.on('playerSafe', ({ playerId, playerName }) => {
+  if (playerId === gameState.playerId) {
+    showNotification('You are SAFE! (No cards left)', 'success');
+  } else {
+    showNotification(`${playerName || 'Someone'} is SAFE!`, 'success');
+  }
+});
+
+socket.on('gameOver', ({ loser, safePlayers }) => {
+  displayGameOver(loser, safePlayers);
 });
 
 socket.on('playerLeft', ({ playerId, playerName }) => {
   showNotification(`${playerName} left the game`, 'warning');
 });
 
-socket.on('error', ({ message }) => {
+socket.on('gameError', ({ message }) => {
   showError(message);
 });
 
@@ -354,18 +428,55 @@ function updatePlayersList(players) {
   }
 }
 
+function updateLobbyFromGameState(state) {
+  if (!playersList || !state || !Array.isArray(state.players)) return;
+
+  const hostId = state.players.length > 0 ? state.players[0].id : null;
+  playersList.innerHTML = '';
+  state.players.forEach(player => {
+    const div = document.createElement('div');
+    div.className = 'player-item';
+    const hostLabel = player.id === hostId ? ' (Host)' : '';
+    div.textContent = `${player.name}${hostLabel}`;
+    playersList.appendChild(div);
+  });
+
+  // Start button visible only for host and 2+ players before game starts
+  if (startGameBtn) {
+    const isHost = hostId && hostId === gameState.playerId;
+    startGameBtn.style.display = isHost && state.players.length >= 2 && !state.hasStarted ? 'block' : 'none';
+  }
+
+  if (gameSettingsDisplay && state.settings) {
+    const lines = [];
+    if (state.settings.stackPlusTwoFour) lines.push('Stacking +2/+4: ON');
+    if (state.settings.sevenZeroRule) lines.push('7-0 Rule: ON');
+    if (state.settings.jumpInRule) lines.push('Jump-in: ON');
+    gameSettingsDisplay.textContent = lines.length ? lines.join(' • ') : 'Game variations: OFF';
+  }
+}
+
 function updateGameState(state) {
   gameState.lastTopCard = state.topCard;
   gameState.lastCurrentColor = state.currentColor;
   gameState.lastCurrentPlayerId = state.currentPlayerId;
+  gameState.lastPlayers = state.players;
+
+  // Update lobby UI from game state
+  updateLobbyFromGameState(state);
   
   // Update top card display
   if (discardPile && state.topCard) {
     const colorClass = state.topCard.color === 'wild' ? 'black' : state.topCard.color;
+    const display = getCardDisplay(state.topCard);
     discardPile.innerHTML = `
       <div class="uno-card ${colorClass}">
-        <div class="card-value">${formatCardValue(state.topCard)}</div>
-        <div class="card-symbol">${formatCardValue(state.topCard)}</div>
+        <div class="card-corner top-left">${display.corner}</div>
+        <div class="card-corner bottom-right">${display.corner}</div>
+        <div class="card-center">
+          <div class="card-value">${display.main}</div>
+          <div class="card-symbol">${display.sub}</div>
+        </div>
       </div>
     `;
     discardPile.style.animation = 'none';
@@ -381,13 +492,20 @@ function updateGameState(state) {
   }
   
   // Update deck count
+  // User preference: do not show remaining deck size
   if (deckCount) {
-    deckCount.textContent = state.deckCount || 0;
+    deckCount.textContent = '';
   }
   
   // Update turn indicator
   const isMyTurn = state.currentPlayerId === gameState.playerId;
   gameState.isMyTurn = isMyTurn;
+
+  // If the turn moved away from me, clear any pending draw/pass state.
+  if (!isMyTurn) {
+    gameState.canPassAfterDraw = false;
+    gameState.drawnCardIndex = null;
+  }
   
   if (turnIndicator) {
     if (isMyTurn) {
@@ -403,24 +521,95 @@ function updateGameState(state) {
   // Update other players
   if (otherPlayers) {
     otherPlayers.innerHTML = '';
-    state.players.forEach(player => {
-      if (player.id !== gameState.playerId) {
-        const playerDiv = document.createElement('div');
-        playerDiv.className = 'other-player';
-        if (player.id === state.currentPlayerId) {
-          playerDiv.classList.add('active-player');
-        }
-        playerDiv.innerHTML = `
-          <div class="player-name">${player.name}</div>
-          <div class="player-cards">${player.handSize} cards</div>
-        `;
-        otherPlayers.appendChild(playerDiv);
-      }
-    });
+    renderTurnOrder(state);
   }
   
   // Render player hand
   renderPlayerHand(state);
+
+  updateActionButtons();
+}
+
+function renderTurnOrder(state) {
+  if (!otherPlayers || !state || !Array.isArray(state.players)) return;
+
+  const orderRow = document.createElement('div');
+  orderRow.className = 'turn-order';
+
+  const arrow = state.direction === -1 ? '←' : '→';
+
+  state.players.forEach((player, idx) => {
+    const playerDiv = document.createElement('div');
+    playerDiv.className = 'other-player';
+
+    if (player.id === state.currentPlayerId) {
+      playerDiv.classList.add('active-turn');
+    }
+
+    if (player.isSafe) {
+      playerDiv.classList.add('safe');
+    }
+
+    if (player.id === gameState.playerId) {
+      playerDiv.classList.add('me');
+    }
+
+    const displayName = player.id === gameState.playerId ? `${player.name} (You)` : player.name;
+    playerDiv.innerHTML = `
+      <div class="player-name">${displayName}</div>
+      <div class="card-count">${player.cardCount}</div>
+    `;
+
+    // UNO status (no numeric card counts)
+    if (player.cardCount === 1) {
+      if (player.hasCalledUno) {
+        const badge = document.createElement('div');
+        badge.className = 'uno-badge uno-ok';
+        badge.textContent = 'UNO';
+        playerDiv.appendChild(badge);
+      } else {
+        if (player.id !== gameState.playerId) {
+          const catchBtn = document.createElement('button');
+          catchBtn.className = 'catch-btn';
+          catchBtn.type = 'button';
+          catchBtn.textContent = 'CATCH';
+          catchBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            socket.emit('challengeUno', { targetPlayerId: player.id });
+          });
+          playerDiv.appendChild(catchBtn);
+        }
+      }
+    }
+
+    orderRow.appendChild(playerDiv);
+
+    if (idx < state.players.length - 1) {
+      const arrowDiv = document.createElement('div');
+      arrowDiv.className = 'turn-arrow';
+      arrowDiv.textContent = arrow;
+      orderRow.appendChild(arrowDiv);
+    }
+  });
+
+  otherPlayers.appendChild(orderRow);
+}
+
+function canSayUnoNow() {
+  if (!Array.isArray(gameState.currentHand)) return false;
+  if (gameState.currentHand.length === 1) return true;
+  return !!(gameState.isMyTurn && gameState.currentHand.length === 2);
+}
+
+function updateActionButtons() {
+  if (sayUnoBtn) {
+    sayUnoBtn.disabled = !canSayUnoNow();
+  }
+
+  if (drawCardBtn) {
+    drawCardBtn.disabled = !gameState.isMyTurn;
+    drawCardBtn.textContent = gameState.canPassAfterDraw ? 'Pass' : 'Draw Card';
+  }
 }
 
 function renderPlayerHand(state) {
@@ -450,15 +639,25 @@ function renderPlayerHand(state) {
     
     console.log(`  Card ${index}:`, card.color, card.value);
     
-    // Add card content
+    const display = getCardDisplay(card);
     cardDiv.innerHTML = `
-      <div class="card-value">${formatCardValue(card)}</div>
-      <div class="card-symbol">${formatCardValue(card)}</div>
+      <div class="card-corner top-left">${display.corner}</div>
+      <div class="card-corner bottom-right">${display.corner}</div>
+      <div class="card-center">
+        <div class="card-value">${display.main}</div>
+        <div class="card-symbol">${display.sub}</div>
+      </div>
     `;
     
     // Check if card is playable
     if (state && state.topCard) {
-      const isPlayable = canPlayCard(card, state.topCard, state.currentColor);
+      let isPlayable = canPlayCard(card, state.topCard, state.currentColor);
+
+      // If we drew a playable card this turn, only the drawn card may be played.
+      if (gameState.canPassAfterDraw && typeof gameState.drawnCardIndex === 'number') {
+        isPlayable = isPlayable && index === gameState.drawnCardIndex;
+      }
+
       if (isPlayable && gameState.isMyTurn) {
         cardDiv.classList.add('playable');
         cardDiv.addEventListener('click', () => playCard(index, card));
@@ -472,38 +671,45 @@ function renderPlayerHand(state) {
     
     playerHand.appendChild(cardDiv);
   });
-  
-  console.log('✅ Cards rendered! DOM
-        cardDiv.classList.add('unplayable');
-      }
-    }
-    
-    playerHand.appendChild(cardDiv);
-  });
-  console.log('Cards rendered, playerHand children:', playerHand.children.length);
+
+  console.log('✅ Cards rendered. playerHand children:', playerHand.children.length);
 }
 
 function createCardHTML(card) {
   const colorClass = card.color === 'wild' ? 'black' : card.color;
+  const display = getCardDisplay(card);
   return `
-    <div class="card-value">${formatCardValue(card)}</div>
-    <div class="card-symbol">${formatCardValue(card)}</div>
+    <div class="card-corner top-left">${display.corner}</div>
+    <div class="card-corner bottom-right">${display.corner}</div>
+    <div class="card-center">
+      <div class="card-value">${display.main}</div>
+      <div class="card-symbol">${display.sub}</div>
+    </div>
   `;
 }
 
-function formatCardValue(card) {
-  if (card.value === 'wild') return '🎨';
-  if (card.value === 'wild_draw_four') return '+4';
-  if (card.value === 'draw_two') return '+2';
-  if (card.value === 'skip') return '⊘';
-  if (card.value === 'reverse') return '⇄';
-  return card.value;
+function getCardDisplay(card) {
+  // main: big center text, sub: smaller symbol, corner: corner label
+  switch (card.value) {
+    case 'wild':
+      return { main: 'WILD', sub: '🎨', corner: 'W' };
+    case '+4':
+      return { main: '+4', sub: '+4', corner: '+4' };
+    case '+2':
+      return { main: '+2', sub: '+2', corner: '+2' };
+    case 'skip':
+      return { main: 'SKIP', sub: '⊘', corner: '⊘' };
+    case 'reverse':
+      return { main: 'REV', sub: '⇄', corner: '⇄' };
+    default:
+      return { main: String(card.value), sub: String(card.value), corner: String(card.value) };
+  }
 }
 
 function formatCardName(card) {
   const color = card.color === 'wild' ? 'Wild' : card.color.charAt(0).toUpperCase() + card.color.slice(1);
-  const value = formatCardValue(card);
-  return `${color} ${value}`;
+  const display = getCardDisplay(card);
+  return `${color} ${display.main}`;
 }
 
 function canPlayCard(card, topCard, currentColor) {
@@ -547,13 +753,7 @@ function displayGameOver(loser, stats) {
     <div class="game-over-stats">
       <p class="loser-announcement">${loserName} is the LOSER! 😅</p>
       <p class="winner-announcement">Everyone else WINS! 🏆</p>
-      ${stats ? `
-        <div class="stats">
-          <h3>Game Statistics:</h3>
-          <p>Total turns: ${stats.totalTurns || 'N/A'}</p>
-          <p>Cards played: ${stats.cardsPlayed || 'N/A'}</p>
-        </div>
-      ` : ''}
+      ${Array.isArray(stats) ? `<p>Safe players: ${stats.map(p => p.name).join(', ')}</p>` : ''}
     </div>
   `;
   
@@ -561,6 +761,26 @@ function displayGameOver(loser, stats) {
   
   // Create confetti effect
   createConfetti();
+}
+
+function getSelectedSettings() {
+  const stackPlusTwoFour = document.getElementById('stackPlusTwoFour');
+  const sevenZeroRule = document.getElementById('sevenZeroRule');
+  const jumpInRule = document.getElementById('jumpInRule');
+  return {
+    stackPlusTwoFour: !!(stackPlusTwoFour && stackPlusTwoFour.checked),
+    sevenZeroRule: !!(sevenZeroRule && sevenZeroRule.checked),
+    jumpInRule: !!(jumpInRule && jumpInRule.checked)
+  };
+}
+
+function getPlayerNameById(playerId) {
+  const lastStatePlayers = gameState.lastPlayers;
+  if (Array.isArray(lastStatePlayers)) {
+    const p = lastStatePlayers.find(x => x.id === playerId);
+    return p ? p.name : null;
+  }
+  return null;
 }
 
 function createConfetti() {

@@ -24,7 +24,26 @@ class Game {
     };
     
     // UNO tracking
-    this.unoCalled = new Set(); // Players who called UNO
+    this.unoCalled = new Set(); // Players who properly called UNO for their current 1-card state
+    this.unoVulnerable = new Set(); // Players who ended a turn with 1 card and did NOT call UNO
+
+    // Draw-then-play flow (UNO rule): after drawing, you may play ONLY the drawn card (if playable) or pass.
+    this.pendingDraw = null; // { playerId, cardIndex, canPlay }
+  }
+
+  updateUnoStateForPlayer(player) {
+    // UNO state only matters while the player has exactly 1 card.
+    if (!player) return;
+    if (player.hand.length === 1) {
+      if (this.unoCalled.has(player.id)) {
+        this.unoVulnerable.delete(player.id);
+      }
+      return;
+    }
+
+    // Once hand is not 1, clear UNO-related state.
+    this.unoCalled.delete(player.id);
+    this.unoVulnerable.delete(player.id);
   }
 
   // Add player to game
@@ -165,8 +184,7 @@ class Game {
       this.currentPlayerIndex = (this.currentPlayerIndex + this.direction + this.players.length) % this.players.length;
     }
     
-    // Clear UNO call for new player
-    this.unoCalled.delete(this.getCurrentPlayer().id);
+    // UNO call/vulnerability is tracked by hand-size transitions.
   }
 
   // Check if card can be played
@@ -191,6 +209,15 @@ class Game {
     if (!card) throw new Error('Invalid card');
     
     const currentCard = this.discardPile[this.discardPile.length - 1];
+
+    // If the player drew this turn and the drawn card is playable, they may only play that drawn card (or pass).
+    if (this.pendingDraw && this.pendingDraw.playerId === playerId) {
+      if (cardIndex !== this.pendingDraw.cardIndex) {
+        throw new Error('After drawing, you may only play the drawn card or pass');
+      }
+      // Consuming the draw restriction now.
+      this.pendingDraw = null;
+    }
     
     if (!this.canPlayCard(card, currentCard)) {
       throw new Error('Cannot play this card');
@@ -201,7 +228,7 @@ class Game {
       const hasValidCard = player.hand.some((c, i) => 
         i !== cardIndex && this.canPlayCard(c, currentCard) && c.value !== '+4'
       );
-      if (hasValidCard && chosenColor === null) {
+      if (hasValidCard) {
         throw new Error('Cannot play Wild +4 when you have a valid card');
       }
     }
@@ -224,6 +251,19 @@ class Game {
     
     // Handle card effects
     this.handleCardEffect(card, player);
+
+    // If the player now has exactly 1 card, they must have called UNO earlier (at 2 cards)
+    // or they become challengeable.
+    if (player.hand.length === 1) {
+      if (!this.unoCalled.has(player.id)) {
+        this.unoVulnerable.add(player.id);
+      } else {
+        this.unoVulnerable.delete(player.id);
+      }
+    } else {
+      // If they didn't land on 1 card, clear UNO state.
+      this.updateUnoStateForPlayer(player);
+    }
     
     // Check if player is safe (finished all cards)
     let playerSafe = false;
@@ -231,6 +271,7 @@ class Game {
       player.isSafe = true;
       this.safePlayers.push({ id: player.id, name: player.name });
       playerSafe = true;
+      this.updateUnoStateForPlayer(player);
     }
     
     // Move to next player
@@ -300,6 +341,8 @@ class Game {
         player.hand.push(this.deck.pop());
       }
     }
+
+    this.updateUnoStateForPlayer(player);
   }
 
   // Draw a card
@@ -309,17 +352,60 @@ class Game {
     if (!currentPlayer || currentPlayer.id !== playerId) {
       throw new Error('Not your turn');
     }
+
+    if (this.pendingDraw && this.pendingDraw.playerId === playerId) {
+      throw new Error('You already drew a card. Play it (if possible) or pass');
+    }
+
+    const player = this.players.find(p => p.id === playerId);
+    if (!player) throw new Error('Player not found');
+
+    const currentCard = this.discardPile[this.discardPile.length - 1];
+
+    // House rule requested: only draw if you have no playable card.
+    const hasPlayableCard = player.hand.some(c => this.canPlayCard(c, currentCard));
+    if (hasPlayableCard) {
+      throw new Error('You have a playable card. You cannot draw');
+    }
     
     if (this.deck.length === 0) {
       this.reshuffleDiscardPile();
     }
     
-    if (this.deck.length > 0) {
-      const player = this.players.find(p => p.id === playerId);
-      player.hand.push(this.deck.pop());
+    if (this.deck.length === 0) {
+      throw new Error('No cards left to draw');
     }
-    
-    // Move to next player
+
+    player.hand.push(this.deck.pop());
+    this.updateUnoStateForPlayer(player);
+
+    const drawnCardIndex = player.hand.length - 1;
+    const drawnCard = player.hand[drawnCardIndex];
+    const canPlayDrawnCard = this.canPlayCard(drawnCard, currentCard);
+
+    if (canPlayDrawnCard) {
+      this.pendingDraw = { playerId, cardIndex: drawnCardIndex, canPlay: true };
+      return { drawnCard, drawnCardIndex, canPlayDrawnCard: true, turnContinues: true };
+    }
+
+    // If the drawn card cannot be played, the turn ends immediately.
+    this.pendingDraw = null;
+    this.nextPlayer();
+    return { drawnCard, drawnCardIndex, canPlayDrawnCard: false, turnContinues: false };
+  }
+
+  // Pass after drawing a playable card (keep it and end turn)
+  passTurnAfterDraw(playerId) {
+    const currentPlayer = this.getCurrentPlayer();
+    if (!currentPlayer || currentPlayer.id !== playerId) {
+      throw new Error('Not your turn');
+    }
+
+    if (!this.pendingDraw || this.pendingDraw.playerId !== playerId) {
+      throw new Error('Nothing to pass. Draw a card first');
+    }
+
+    this.pendingDraw = null;
     this.nextPlayer();
   }
 
@@ -335,7 +421,35 @@ class Game {
 
   // Say UNO
   sayUno(playerId) {
-    this.unoCalled.add(playerId);
+    const player = this.players.find(p => p.id === playerId);
+    if (!player) return;
+
+    // Support both common flows:
+    // - "Early" UNO at 2 cards (on your turn)
+    // - Standard UNO at 1 card (after you play down to 1), while you are vulnerable
+
+    if (player.hand.length === 2) {
+      const currentPlayer = this.getCurrentPlayer();
+      if (!currentPlayer || currentPlayer.id !== playerId) {
+        throw new Error('Not your turn');
+      }
+
+      this.unoCalled.add(playerId);
+      this.unoVulnerable.delete(playerId);
+      return;
+    }
+
+    if (player.hand.length === 1) {
+      if (!this.unoVulnerable.has(playerId)) {
+        throw new Error('You cannot say UNO right now');
+      }
+
+      this.unoCalled.add(playerId);
+      this.unoVulnerable.delete(playerId);
+      return;
+    }
+
+    throw new Error('You can only say UNO when you have 1 or 2 cards');
   }
 
   // Challenge UNO (penalize player who didn't call UNO with 1 card)
@@ -344,8 +458,12 @@ class Game {
     if (!target) return false;
     
     // If player has 1 card and didn't call UNO
-    if (target.hand.length === 1 && !this.unoCalled.has(targetPlayerId)) {
-      this.drawCardsForPlayer(target, 2); // Penalty: draw 2 cards
+    if (
+      target.hand.length === 1 &&
+      this.unoVulnerable.has(targetPlayerId) &&
+      !this.unoCalled.has(targetPlayerId)
+    ) {
+      this.drawCardsForPlayer(target, 4); // Penalty: draw 4 cards
       return true;
     }
     return false;

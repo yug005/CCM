@@ -89,6 +89,12 @@ Your game is now live! Railway gives you a URL like `https://xxx.up.railway.app`
 
 **Best for**: If you want CDN-backed hosting
 
+⚠️ **Important**: This project uses Socket.IO (WebSockets). Vercel is optimized for serverless/edge functions and static sites, and real-time Socket.IO multiplayer may not work reliably if you try to run the Socket.IO server on Vercel.
+
+Recommended approaches:
+- Deploy the whole app to **Render/Railway** (simplest, most reliable).
+- Or deploy **frontend on Vercel** and the **Socket.IO backend on Render/Railway**, then set `window.SOCKET_SERVER_URL` in `public/index.html` to your backend URL.
+
 1. Install Vercel CLI:
    ```bash
    npm install -g vercel
