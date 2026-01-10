@@ -229,22 +229,20 @@ socket.on('gameState', (state) => {
 socket.on('playerHand', (hand) => {
   console.log('✅ Received player hand:', hand);
   console.log('Hand length:', hand ? hand.length : 0);
-  console.log('Game screen active:', gameScreen ? gameScreen.classList.contains('active') : false);
   
+  // FIX: Store hand and render immediately - no waiting for gameState
   gameState.currentHand = hand;
   
-  // Always try to render if we have the game state
-  if (gameState.lastTopCard || gameState.lastCurrentColor) {
-    const state = { 
-      topCard: gameState.lastTopCard, 
-      currentColor: gameState.lastCurrentColor,
-      currentPlayerId: gameState.lastCurrentPlayerId 
-    };
-    console.log('Rendering with state:', state);
-    renderPlayerHand(state);
-  } else {
-    console.log('⚠️ Waiting for gameState before rendering cards');
-  }
+  // Build state object (may be incomplete on first render, that's OK)
+  const state = { 
+    topCard: gameState.lastTopCard, 
+    currentColor: gameState.lastCurrentColor,
+    currentPlayerId: gameState.lastCurrentPlayerId 
+  };
+  
+  // ALWAYS render cards immediately when they arrive
+  console.log('Rendering cards immediately...');
+  renderPlayerHand(state);
 });
 
 socket.on('gameStarted', () => {
@@ -419,7 +417,14 @@ function updateGameState(state) {
         otherPlayers.appendChild(playerDiv);
       }
     });
-  }🎴 renderPlayerHand called');
+  }
+  
+  // Render player hand
+  renderPlayerHand(state);
+}
+
+function renderPlayerHand(state) {
+  console.log('🎴 renderPlayerHand called');
   console.log('  - Cards in hand:', gameState.currentHand ? gameState.currentHand.length : 0);
   console.log('  - State:', state);
   console.log('  - playerHand element:', playerHand ? 'exists' : 'NULL');
@@ -460,6 +465,9 @@ function updateGameState(state) {
       } else {
         cardDiv.classList.add('unplayable');
       }
+    } else {
+      // No game state yet - just show cards without click handlers
+      cardDiv.classList.add('unplayable');
     }
     
     playerHand.appendChild(cardDiv);
