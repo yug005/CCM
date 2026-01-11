@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Color Clash Admin</title>
+  <link rel="stylesheet" href="/admin/admin.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <h1>Admin Dashboard</h1>
+      <div class="meta">
+        <button id="refreshBtn" class="btn">Refresh</button>
+        <span id="statusPill" class="pill">Disconnected</span>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="cardHeader">
+        <h2>Rooms</h2>
+        <div id="roomsSummary" class="muted">—</div>
+      </div>
+
+      <div id="roomsContainer" class="rooms">
+        <!-- rendered by admin.js -->
+      </div>
+    </section>
+
+    <footer class="foot muted">
+      <div>Tip: open as <code>/admin?token=YOUR_ADMIN_TOKEN</code></div>
+    </footer>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/admin/admin.js"></script>
+</body>
+</html>

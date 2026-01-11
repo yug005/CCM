@@ -1,3 +1,25 @@
+# Developer Admin Dashboard
+
+This server supports an optional developer-only dashboard to:
+- See all active rooms and who is playing in each room
+- Kick any player with a custom message shown on their screen
+
+## Enable (Render)
+
+1. In Render → your service → **Environment**, add:
+   - `ADMIN_TOKEN` = a long secret (keep private)
+2. Deploy/restart.
+
+## Use
+
+Open:
+
+`https://<your-app>.onrender.com/admin?token=<ADMIN_TOKEN>`
+
+Notes:
+- If `ADMIN_TOKEN` is not set, the `/admin` route returns 404 and the admin Socket.IO namespace is disabled.
+- Kicked players will see your custom message and return to the home screen.
+
 # 🚀 Deployment Guide - Color Clash Multiplayer
 
 Your game is now **production-ready**! Here's how to deploy it online so you can play with friends from anywhere.

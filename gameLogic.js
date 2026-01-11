@@ -3,6 +3,11 @@
 class Game {
   constructor(roomCode, settings = {}) {
     this.roomCode = roomCode;
+    // Lobby / room metadata (managed by server)
+    this.hostId = null;
+    this.lobbyLocked = false;
+    this.bannedNames = new Set();
+
     this.players = [];
     this.safePlayers = []; // Players who finished their cards
     this.deck = [];
@@ -874,9 +879,20 @@ class Game {
     const currentPlayer = this.getCurrentPlayer();
     const topCardRaw = this.discardPile[this.discardPile.length - 1];
     const topCard = this.getActiveCardFace(topCardRaw);
+
+    const resolvedHostId = this.hostId || (this.players.length > 0 ? this.players[0].id : null);
+
+    const getStatus = (p) => {
+      if (!this.hasStarted) return 'lobby';
+      if (this.isGameOver) return 'gameOver';
+      if (p.isSafe) return 'safe';
+      return 'playing';
+    };
     
     return {
       roomCode: this.roomCode,
+      hostId: resolvedHostId,
+      lobbyLocked: !!this.lobbyLocked,
       hasStarted: this.hasStarted,
       isGameOver: this.isGameOver,
       loser: this.loser,
@@ -893,6 +909,7 @@ class Game {
         name: p.name,
         cardCount: p.hand.length,
         isSafe: p.isSafe,
+        status: getStatus(p),
         hasCalledClash: this.clashCalled.has(p.id),
         wins: typeof p.wins === 'number' ? p.wins : 0
       })),

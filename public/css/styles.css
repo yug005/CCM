@@ -653,6 +653,75 @@ body::after {
   gap: 10px;
 }
 
+.player-item .player-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.player-item .player-subtext {
+  font-size: 12px;
+  opacity: 0.75;
+  line-height: 1.2;
+}
+
+.player-item .player-actions-inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.player-action-btn {
+  border: 1px solid rgba(255,255,255,0.25);
+  background: rgba(255,255,255,0.08);
+  color: white;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.player-action-btn:hover {
+  background: rgba(255,255,255,0.14);
+}
+
+.player-action-btn.danger {
+  border-color: rgba(231, 76, 60, 0.55);
+  background: rgba(231, 76, 60, 0.12);
+}
+
+.player-action-btn.danger:hover {
+  background: rgba(231, 76, 60, 0.18);
+}
+
+.host-controls {
+  margin-top: 10px;
+  padding: 16px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 10px;
+}
+
+.host-controls-row {
+  display: flex;
+  gap: 10px;
+}
+
+.host-controls-row .btn {
+  margin-bottom: 0;
+}
+
+.host-controls-hint {
+  margin-top: 10px;
+  font-size: 12px;
+  opacity: 0.8;
+  line-height: 1.25;
+}
+
 .player-item .player-avatar {
   width: 40px;
   height: 40px;

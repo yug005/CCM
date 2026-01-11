@@ -38,6 +38,7 @@ gameState.drawnCardIndex = null;
 let homeScreen, lobbyScreen, gameScreen, errorMessage;
 let playerNameInput, roomCodeInput, createRoomBtn, joinRoomBtn;
 let displayRoomCode, gameRoomCode, copyCodeBtn, playersList, startGameBtn, leaveLobbyBtn;
+let hostControls, lockLobbyBtn, lobbyLockStatus;
 let otherPlayers, deckPile, discardPile, colorIndicator, turnIndicator, playerHand, deckCount, drawCardBtn, callClashBtn;
 let colorPickerModal, gameOverModal, gameOverContent, playAgainBtn, leaveGameBtn;
 let settingsToggle, settingsPanel, gameSettingsDisplay;
@@ -88,6 +89,10 @@ document.addEventListener('DOMContentLoaded', function() {
   playersList = document.getElementById('playersList');
   startGameBtn = document.getElementById('startGameBtn');
   leaveLobbyBtn = document.getElementById('leaveLobbyBtn');
+
+  hostControls = document.getElementById('hostControls');
+  lockLobbyBtn = document.getElementById('lockLobbyBtn');
+  lobbyLockStatus = document.getElementById('lobbyLockStatus');
   
   otherPlayers = document.getElementById('otherPlayers');
   deckPile = document.getElementById('deckPile');
@@ -161,6 +166,26 @@ function attachEventListeners() {
   startGameBtn.addEventListener('click', () => {
     socket.emit('startGame');
   });
+
+  // Host: lock/unlock lobby
+  if (lockLobbyBtn) {
+    lockLobbyBtn.addEventListener('click', () => {
+      socket.emit('setLobbyLock', { locked: !gameState.lobbyLocked });
+    });
+  }
+
+  // Host: kick buttons (event delegation)
+  if (playersList) {
+    playersList.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-action="kick"][data-player-id]');
+      if (!btn) return;
+
+      const playerId = btn.getAttribute('data-player-id');
+      if (!playerId) return;
+
+      socket.emit('kickPlayer', { playerId });
+    });
+  }
   
   // Leave lobby
   leaveLobbyBtn.addEventListener('click', () => {
@@ -306,6 +331,21 @@ socket.on('gameState', (state) => {
     console.log('Re-rendering cards after gameState update');
     renderPlayerHand(state);
   }
+});
+
+socket.on('kicked', ({ message }) => {
+  showNotification(message || 'You were removed by the host', 'warning');
+
+  // Reset local client state and go home.
+  gameState.roomCode = null;
+  gameState.playerId = null;
+  gameState.currentHand = [];
+  gameState.isMyTurn = false;
+  gameState.canPassAfterDraw = false;
+  gameState.drawnCardIndex = null;
+  pendingWildCard = null;
+
+  showScreen('homeScreen');
 });
 
 socket.on('playerHand', (hand) => {
@@ -590,21 +630,70 @@ function updatePlayersList(players) {
 function updateLobbyFromGameState(state) {
   if (!playersList || !state || !Array.isArray(state.players)) return;
 
-  const hostId = state.players.length > 0 ? state.players[0].id : null;
+  const hostId = state.hostId || (state.players.length > 0 ? state.players[0].id : null);
+  const isHost = !!hostId && hostId === gameState.playerId;
+  gameState.lobbyLocked = !!state.lobbyLocked;
+  gameState.isHost = isHost;
+
   playersList.innerHTML = '';
   state.players.forEach(player => {
     const div = document.createElement('div');
     div.className = 'player-item';
+
+    const avatar = document.createElement('div');
+    avatar.className = 'player-avatar';
+    avatar.textContent = (player.name || '?').trim().slice(0, 1).toUpperCase();
+
+    const details = document.createElement('div');
+    details.className = 'player-details';
+
+    const title = document.createElement('div');
     const hostLabel = player.id === hostId ? ' (Host)' : '';
     const wins = typeof player.wins === 'number' ? player.wins : 0;
-    div.textContent = `${player.name}${hostLabel}  ★${wins}`;
+    title.textContent = `${player.name}${hostLabel}  ★${wins}`;
+
+    const sub = document.createElement('div');
+    sub.className = 'player-subtext';
+    const status = player.status || (state.hasStarted ? 'playing' : 'lobby');
+    sub.textContent = `Status: ${status}${player.id === gameState.playerId ? ' • You' : ''}`;
+
+    details.appendChild(title);
+    details.appendChild(sub);
+
+    const actions = document.createElement('div');
+    actions.className = 'player-actions-inline';
+    if (isHost && !state.hasStarted && player.id !== gameState.playerId) {
+      const kickBtn = document.createElement('button');
+      kickBtn.className = 'player-action-btn danger';
+      kickBtn.textContent = 'Kick';
+      kickBtn.setAttribute('data-action', 'kick');
+      kickBtn.setAttribute('data-player-id', player.id);
+      actions.appendChild(kickBtn);
+    }
+
+    div.appendChild(avatar);
+    div.appendChild(details);
+    div.appendChild(actions);
     playersList.appendChild(div);
   });
 
   // Start button visible only for host and 2+ players before game starts
   if (startGameBtn) {
-    const isHost = hostId && hostId === gameState.playerId;
     startGameBtn.style.display = isHost && state.players.length >= 2 && !state.hasStarted ? 'block' : 'none';
+  }
+
+  // Host controls panel
+  if (hostControls) {
+    hostControls.style.display = isHost && !state.hasStarted ? 'block' : 'none';
+  }
+  if (lockLobbyBtn) {
+    lockLobbyBtn.textContent = state.lobbyLocked ? 'Unlock Lobby' : 'Lock Lobby';
+    lockLobbyBtn.disabled = !isHost || !!state.hasStarted;
+  }
+  if (lobbyLockStatus) {
+    lobbyLockStatus.textContent = state.lobbyLocked
+      ? 'Lobby is locked: new players cannot join.'
+      : 'Lobby is open: friends can join with the code.';
   }
 
   if (gameSettingsDisplay && state.settings) {
