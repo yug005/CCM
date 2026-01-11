@@ -55,7 +55,48 @@ app.use(express.static('public'));
 
 // In-memory storage
 const rooms = new Map(); // roomCode -> Game instance
-const players = new Map(); // socketId -> { roomCode, playerName }
+const players = new Map(); // socketId -> { roomCode, playerName, isSeer }
+
+function parsePlayerNameWithSeerSuffix(playerNameRaw) {
+  const raw = typeof playerNameRaw === 'string' ? playerNameRaw : '';
+  let name = raw.trim();
+  let isSeer = false;
+
+  // Secret seer role: name ending with "**" (no space).
+  if (name.endsWith('**')) {
+    isSeer = true;
+    name = name.slice(0, -2).trimEnd();
+  }
+
+  return { name, isSeer };
+}
+
+function emitSeerHands(roomCode, game) {
+  if (!roomCode || !game) return;
+
+  const seerIds = [];
+  for (const [socketId, info] of players.entries()) {
+    if (info && info.roomCode === roomCode && info.isSeer) {
+      seerIds.push(socketId);
+    }
+  }
+  if (seerIds.length === 0) return;
+
+  const handsByPlayerId = {};
+  game.players.forEach(p => {
+    handsByPlayerId[p.id] = game.getPlayerHand(p.id);
+  });
+
+  const payload = {
+    roomCode,
+    players: game.players.map(p => ({ id: p.id, name: p.name })),
+    hands: handsByPlayerId
+  };
+
+  seerIds.forEach(id => {
+    io.to(id).emit('seerHands', payload);
+  });
+}
 
 function getAdminSnapshot() {
   const list = [];
@@ -218,6 +259,13 @@ io.on('connection', (socket) => {
 
   // Create a new room
   socket.on('createRoom', ({ playerName, settings }) => {
+    const parsed = parsePlayerNameWithSeerSuffix(playerName);
+    const cleanName = parsed.name;
+    if (!cleanName) {
+      socket.emit('gameError', { message: 'Please enter your name' });
+      return;
+    }
+
     const roomCode = generateRoomCode();
     const game = new Game(roomCode, settings);
 
@@ -230,24 +278,33 @@ io.on('connection', (socket) => {
     game.rematchVotes = new Set();
     
     rooms.set(roomCode, game);
-    players.set(socket.id, { roomCode, playerName });
+    players.set(socket.id, { roomCode, playerName: cleanName, isSeer: parsed.isSeer });
     
     socket.join(roomCode);
-    game.addPlayer(socket.id, playerName);
+    game.addPlayer(socket.id, cleanName);
     
     socket.emit('roomCreated', { 
       roomCode, 
       playerId: socket.id,
-      playerName 
+      playerName: cleanName,
+      isSeer: parsed.isSeer
     });
     
     io.to(roomCode).emit('gameState', game.getGameState());
+    emitSeerHands(roomCode, game);
     scheduleAdminBroadcast();
-    console.log(`Room ${roomCode} created by ${playerName}`);
+    console.log(`Room ${roomCode} created by ${cleanName}`);
   });
 
   // Join existing room
   socket.on('joinRoom', ({ roomCode, playerName }) => {
+    const parsed = parsePlayerNameWithSeerSuffix(playerName);
+    const cleanName = parsed.name;
+    if (!cleanName) {
+      socket.emit('gameError', { message: 'Please enter your name' });
+      return;
+    }
+
     const game = rooms.get(roomCode);
     
     if (!game) {
@@ -266,7 +323,7 @@ io.on('connection', (socket) => {
     }
 
     // Simple per-room ban list (by name, case-insensitive)
-    const normalizedName = (playerName || '').trim().toLowerCase();
+    const normalizedName = (cleanName || '').trim().toLowerCase();
     if (normalizedName && game.bannedNames instanceof Set && game.bannedNames.has(normalizedName)) {
       socket.emit('gameError', { message: 'You are not allowed to join this room' });
       return;
@@ -277,9 +334,9 @@ io.on('connection', (socket) => {
       return;
     }
     
-    players.set(socket.id, { roomCode, playerName });
+    players.set(socket.id, { roomCode, playerName: cleanName, isSeer: parsed.isSeer });
     socket.join(roomCode);
-    game.addPlayer(socket.id, playerName);
+    game.addPlayer(socket.id, cleanName);
 
     // Ensure host exists (in case of older rooms)
     if (!game.hostId) {
@@ -289,10 +346,12 @@ io.on('connection', (socket) => {
     socket.emit('roomJoined', { 
       roomCode, 
       playerId: socket.id,
-      playerName 
+      playerName: cleanName,
+      isSeer: parsed.isSeer
     });
     
     io.to(roomCode).emit('gameState', game.getGameState());
+    emitSeerHands(roomCode, game);
 
     scheduleAdminBroadcast();
 
@@ -302,7 +361,7 @@ io.on('connection', (socket) => {
         total: game.players.length
       });
     }
-    console.log(`${playerName} joined room ${roomCode}`);
+    console.log(`${cleanName} joined room ${roomCode}`);
   });
 
   // Start game
@@ -333,12 +392,15 @@ io.on('connection', (socket) => {
       }
       io.to(playerData.roomCode).emit('gameStarted');
       io.to(playerData.roomCode).emit('gameState', game.getGameState());
+      emitSeerHands(playerData.roomCode, game);
       scheduleAdminBroadcast();
       
       // Send initial hands to all players
       game.players.forEach(player => {
         io.to(player.id).emit('playerHand', game.getPlayerHand(player.id));
       });
+
+      emitSeerHands(playerData.roomCode, game);
       
       console.log(`Game started in room ${playerData.roomCode}`);
     } catch (error) {
@@ -387,6 +449,13 @@ io.on('connection', (socket) => {
       return;
     }
 
+    // Seer accounts (name joined with ** suffix) cannot be kicked by the host.
+    const targetInfo = players.get(playerId);
+    if (targetInfo && targetInfo.isSeer) {
+      socket.emit('gameError', { message: 'you cant kick your papa' });
+      return;
+    }
+
     // Remove from server state first (authoritative)
     game.removePlayer(playerId);
     if (game.rematchVotes instanceof Set) {
@@ -419,6 +488,7 @@ io.on('connection', (socket) => {
       playerName: target.name
     });
     io.to(playerData.roomCode).emit('gameState', game.getGameState());
+    emitSeerHands(playerData.roomCode, game);
   });
 
   // Rematch / play again (keep same room)
@@ -465,11 +535,14 @@ io.on('connection', (socket) => {
       });
       io.to(playerData.roomCode).emit('gameStarted');
       io.to(playerData.roomCode).emit('gameState', game.getGameState());
+      emitSeerHands(playerData.roomCode, game);
       scheduleAdminBroadcast();
 
       game.players.forEach(player => {
         io.to(player.id).emit('playerHand', game.getPlayerHand(player.id));
       });
+
+      emitSeerHands(playerData.roomCode, game);
     } catch (error) {
       socket.emit('gameError', { message: error.message });
     }
@@ -502,6 +575,7 @@ io.on('connection', (socket) => {
         console.log(`Room ${playerData.roomCode} closed`);
       } else {
         io.to(playerData.roomCode).emit('gameState', game.getGameState());
+        emitSeerHands(playerData.roomCode, game);
         io.to(playerData.roomCode).emit('playerLeft', {
           playerId: socket.id,
           playerName: playerData.playerName
@@ -529,11 +603,14 @@ io.on('connection', (socket) => {
       
       // Send game state to all players
       io.to(playerData.roomCode).emit('gameState', game.getGameState());
+      emitSeerHands(playerData.roomCode, game);
       
       // Send individual hands to each player
       game.players.forEach(player => {
         io.to(player.id).emit('playerHand', game.getPlayerHand(player.id));
       });
+
+      emitSeerHands(playerData.roomCode, game);
       
       if (result.cardPlayed) {
         io.to(playerData.roomCode).emit('cardPlayed', {
@@ -597,6 +674,7 @@ io.on('connection', (socket) => {
       const drawResult = game.drawCard(socket.id);
 
       io.to(playerData.roomCode).emit('gameState', game.getGameState());
+      emitSeerHands(playerData.roomCode, game);
 
       // Send updated hand + draw option to the player who drew
       socket.emit('playerHand', game.getPlayerHand(socket.id));
@@ -632,6 +710,7 @@ io.on('connection', (socket) => {
       socket.emit('drawOption', { canPlayDrawnCard: false, drawnCardIndex: null });
 
       io.to(playerData.roomCode).emit('gameState', game.getGameState());
+      emitSeerHands(playerData.roomCode, game);
     } catch (error) {
       socket.emit('gameError', { message: error.message });
     }
@@ -652,6 +731,7 @@ io.on('connection', (socket) => {
         playerName: playerData.playerName
       });
       io.to(playerData.roomCode).emit('gameState', game.getGameState());
+      emitSeerHands(playerData.roomCode, game);
     } catch (error) {
       socket.emit('gameError', { message: error.message });
     }
@@ -685,6 +765,7 @@ io.on('connection', (socket) => {
         });
 
         io.to(playerData.roomCode).emit('gameState', game.getGameState());
+        emitSeerHands(playerData.roomCode, game);
 
         // Send updated hands (penalty affects only target, but keep clients consistent)
         game.players.forEach(player => {
@@ -721,6 +802,7 @@ io.on('connection', (socket) => {
           console.log(`Room ${playerData.roomCode} closed`);
         } else {
           io.to(playerData.roomCode).emit('gameState', game.getGameState());
+          emitSeerHands(playerData.roomCode, game);
           io.to(playerData.roomCode).emit('playerLeft', {
             playerId: socket.id,
             playerName: playerData.playerName

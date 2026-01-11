@@ -772,6 +772,63 @@ body::after {
   min-height: 80px;
 }
 
+.seer-panel {
+  margin: 10px auto 15px;
+  max-width: 1100px;
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+}
+
+.seer-panel-title {
+  font-weight: 900;
+  letter-spacing: 0.6px;
+  margin-bottom: 8px;
+  opacity: 0.9;
+}
+
+.seer-panel-body {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.seer-row {
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+}
+
+.seer-row .seer-name {
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.seer-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.seer-card {
+  font-size: 12px;
+  font-weight: 900;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.20);
+  background: rgba(0,0,0,0.18);
+  user-select: none;
+}
+
+.seer-card.red { background: rgba(231,76,60,0.18); }
+.seer-card.blue { background: rgba(52,152,219,0.18); }
+.seer-card.green { background: rgba(46,204,113,0.18); }
+.seer-card.yellow { background: rgba(241,196,15,0.18); }
+.seer-card.wild { background: rgba(149,165,166,0.18); }
+
 .turn-order {
   display: flex;
   flex-wrap: wrap;
@@ -1664,4 +1721,41 @@ body::after {
   .player-hand {
     gap: 6px;
   }
+}
+
+/* Big centered popup (used for special moderation messages) */
+.center-popup-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.0);
+  z-index: 9999;
+  opacity: 0;
+  transition: opacity 180ms ease, background 180ms ease;
+}
+
+.center-popup-backdrop.show {
+  opacity: 1;
+  background: rgba(0,0,0,0.55);
+}
+
+.center-popup {
+  max-width: 92vw;
+  padding: 22px 18px;
+  border-radius: 14px;
+  border: 2px solid rgba(255,255,255,0.18);
+  background: rgba(20, 20, 30, 0.92);
+  color: rgba(255,255,255,0.95);
+  font-size: 28px;
+  font-weight: 900;
+  text-align: center;
+  letter-spacing: 0.4px;
+  transform: scale(0.98);
+  transition: transform 180ms ease;
+}
+
+.center-popup-backdrop.show .center-popup {
+  transform: scale(1);
 }

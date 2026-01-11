@@ -39,6 +39,7 @@ let homeScreen, lobbyScreen, gameScreen, errorMessage;
 let playerNameInput, roomCodeInput, createRoomBtn, joinRoomBtn;
 let displayRoomCode, gameRoomCode, copyCodeBtn, playersList, startGameBtn, leaveLobbyBtn;
 let hostControls, lockLobbyBtn, lobbyLockStatus;
+let seerPanel, seerPanelBody;
 let otherPlayers, deckPile, discardPile, colorIndicator, turnIndicator, playerHand, deckCount, drawCardBtn, callClashBtn;
 let colorPickerModal, gameOverModal, gameOverContent, playAgainBtn, leaveGameBtn;
 let settingsToggle, settingsPanel, gameSettingsDisplay;
@@ -95,6 +96,8 @@ document.addEventListener('DOMContentLoaded', function() {
   lobbyLockStatus = document.getElementById('lobbyLockStatus');
   
   otherPlayers = document.getElementById('otherPlayers');
+  seerPanel = document.getElementById('seerPanel');
+  seerPanelBody = document.getElementById('seerPanelBody');
   deckPile = document.getElementById('deckPile');
   discardPile = document.getElementById('discardPile');
   colorIndicator = document.getElementById('colorIndicator');
@@ -306,20 +309,36 @@ function attachEventListeners() {
 
 // Socket event handlers
 
-socket.on('roomCreated', ({ roomCode, playerId, playerName }) => {
+socket.on('roomCreated', ({ roomCode, playerId, playerName, isSeer }) => {
   gameState.roomCode = roomCode;
   gameState.playerId = playerId;
+  if (playerName) gameState.playerName = playerName;
+  gameState.isSeer = !!isSeer;
+  if (gameState.isSeer) {
+    showNotification('Seer role enabled', 'success');
+  }
   displayRoomCode.textContent = roomCode;
   gameRoomCode.textContent = roomCode;
   showScreen('lobbyScreen');
 });
 
-socket.on('roomJoined', ({ roomCode, playerId, playerName }) => {
+socket.on('roomJoined', ({ roomCode, playerId, playerName, isSeer }) => {
   gameState.roomCode = roomCode;
   gameState.playerId = playerId;
+  if (playerName) gameState.playerName = playerName;
+  gameState.isSeer = !!isSeer;
+  if (gameState.isSeer) {
+    showNotification('Seer role enabled', 'success');
+  }
   displayRoomCode.textContent = roomCode;
   gameRoomCode.textContent = roomCode;
   showScreen('lobbyScreen');
+});
+
+socket.on('seerHands', (payload) => {
+  if (!payload || payload.roomCode !== gameState.roomCode) return;
+  gameState.seerHands = payload;
+  renderSeerPanel();
 });
 
 socket.on('gameState', (state) => {
@@ -562,6 +581,12 @@ socket.on('playerLeft', ({ playerId, playerName }) => {
 socket.on('gameError', ({ message }) => {
   const msg = message || 'Something went wrong';
 
+  // Special host-kick denial message: show big in the middle of the screen.
+  if (msg.trim().toLowerCase() === 'you cant kick your papa') {
+    showCenterPopup(msg);
+    return;
+  }
+
   // In-game errors should be visible even when the home screen is not active.
   showNotification(msg, 'error');
 
@@ -570,6 +595,35 @@ socket.on('gameError', ({ message }) => {
     showError(msg);
   }
 });
+
+function showCenterPopup(message) {
+  const existing = document.getElementById('centerPopupBackdrop');
+  if (existing) existing.remove();
+
+  const backdrop = document.createElement('div');
+  backdrop.id = 'centerPopupBackdrop';
+  backdrop.className = 'center-popup-backdrop';
+
+  const box = document.createElement('div');
+  box.className = 'center-popup';
+  box.setAttribute('role', 'alert');
+  box.textContent = message;
+
+  backdrop.appendChild(box);
+  document.body.appendChild(backdrop);
+
+  requestAnimationFrame(() => {
+    backdrop.classList.add('show');
+  });
+
+  const remove = () => {
+    backdrop.classList.remove('show');
+    setTimeout(() => backdrop.remove(), 180);
+  };
+
+  backdrop.addEventListener('click', remove);
+  setTimeout(remove, 1600);
+}
 
 // UI Functions
 
@@ -792,6 +846,61 @@ function updateGameState(state) {
   renderPlayerHand(state);
 
   updateActionButtons();
+
+  // Seer panel may need updating when player order/names change
+  renderSeerPanel();
+}
+
+function formatCardShort(card) {
+  if (!card) return '?';
+  const color = card.color || 'wild';
+  const value = card.value || '';
+  // Compact tokens like R5, G+2, W+4, etc.
+  const colorPrefix = color === 'wild' ? 'W' : color[0].toUpperCase();
+  return `${colorPrefix}${value}`;
+}
+
+function renderSeerPanel() {
+  if (!seerPanel || !seerPanelBody) return;
+  if (!gameState.isSeer) {
+    seerPanel.style.display = 'none';
+    return;
+  }
+
+  const payload = gameState.seerHands;
+  if (!payload || !payload.players || !payload.hands) {
+    seerPanel.style.display = 'block';
+    seerPanelBody.innerHTML = '<div style="opacity:0.75;">Waiting for hands…</div>';
+    return;
+  }
+
+  seerPanel.style.display = 'block';
+  seerPanelBody.innerHTML = '';
+
+  payload.players.forEach(p => {
+    const row = document.createElement('div');
+    row.className = 'seer-row';
+
+    const name = document.createElement('div');
+    name.className = 'seer-name';
+    name.textContent = p.id === gameState.playerId ? `${p.name} (You)` : p.name;
+
+    const cardsWrap = document.createElement('div');
+    cardsWrap.className = 'seer-cards';
+
+    const hand = payload.hands[p.id] || [];
+    hand.forEach(card => {
+      const chip = document.createElement('div');
+      const c = card && card.color ? card.color : 'wild';
+      chip.className = `seer-card ${c}`;
+      chip.textContent = formatCardShort(card);
+      cardsWrap.appendChild(chip);
+    });
+
+    row.appendChild(name);
+    row.appendChild(cardsWrap);
+    seerPanelBody.appendChild(row);
+  });
 }
 
 function renderTurnOrder(state) {
