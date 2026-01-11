@@ -1,6 +1,6 @@
-# 🎴 Multiplayer Card Game (UNO-style)
+# 🎴 Color Clash Multiplayer
 
-A real-time multiplayer UNO-style card game built with Node.js, Socket.IO, and vanilla JavaScript. Play with 2-6 friends using room codes!
+A real-time multiplayer color-and-action card game built with Node.js, Socket.IO, and vanilla JavaScript. Play with 2-6 friends using room codes!
 
 ## ✨ Features
 
@@ -12,18 +12,17 @@ A real-time multiplayer UNO-style card game built with Node.js, Socket.IO, and v
 - ✅ **Mobile + Desktop** - Fully responsive design
 - ✅ **Touch-friendly** - Optimized for phones and tablets
 
-### UNO Rules Implemented
-- ✅ Standard UNO cards (Numbers, Skip, Reverse, +2, Wild, Wild +4)
+### Rules Implemented
+- ✅ Standard number/action cards (Numbers, Skip, Reverse, +2, Wild, Wild +4)
 - ✅ Proper turn management and direction switching
 - ✅ Color matching and value matching
 - ✅ Wild card color selection
-- ✅ UNO call system
+- ✅ "Call" system (when you're down to one card)
 - ✅ **UNIQUE RULE**: Game continues until only one player remains (they are the loser!)
 
 ### Game Variations (Configurable)
 - ⚙️ Stack +2/+4 cards
 - ⚙️ 7-0 Rule (swap/rotate hands)
-- ⚙️ Jump-in rule
 - ⚙️ Turn timer (optional)
 
 ## 🚀 Quick Start
@@ -74,7 +73,7 @@ Uses nodemon for auto-reload on file changes.
 - **On your turn:** Click a playable card (highlighted)
 - **Wild cards:** Choose a color after clicking
 - **Can't play?** Click "Draw Card"
-- **One card left?** Click "Say UNO!" or risk penalty
+- **One card left?** Click "Call CLASH!" or risk penalty
 
 ### Winning
 - **Players finish:** When you play your last card, you're safe! ✅
@@ -126,9 +125,9 @@ PORT=3000  # Server port (automatically set by most platforms)
 ## 📁 Project Structure
 
 ```
-uno/
+/
 ├── server.js              # Main server with Socket.IO
-├── gameLogic.js           # UNO game rules and state management
+├── gameLogic.js           # Game rules and state management
 ├── package.json           # Dependencies and scripts
 ├── public/
 │   ├── index.html         # Frontend UI
@@ -173,8 +172,8 @@ uno/
 - `playAgain` - Vote for rematch (starts when all players vote)
 - `playCard` - Play a card
 - `drawCard` - Draw from deck
-- `sayUno` - Call UNO
-- `challengeUno` - Challenge missed UNO call
+- `callClash` - Call CLASH
+- `challengeCall` - Challenge missed call
 
 **Server → Client:**
 - `roomCreated` - Room creation confirmation
@@ -190,12 +189,9 @@ uno/
 - `gameOver` - Game ended
 - `error` - Error message
 
-## 📜 License & IP note
+## 📜 License
 
 This repository is licensed under the MIT License (see LICENSE).
-
-Important: MIT only covers *this code*. It does not grant rights to third-party trademarks/brands.
-"UNO" is a trademark of its respective owner. This project is an unaffiliated, fan-made implementation.
 
 ### Game State Schema
 ```javascript
@@ -215,7 +211,7 @@ Important: MIT only covers *this code*. It does not grant rights to third-party 
       name: String,
       cardCount: Number,
       isSafe: Boolean,
-      hasCalledUno: Boolean
+      hasCalledClash: Boolean
     }
   ],
   safePlayers: [{ id, name }],
@@ -262,7 +258,7 @@ Edit CSS variables in [styles.css](public/css/styles.css):
 - [ ] Progressive Web App (PWA)
 - [ ] Database persistence
 - [ ] User accounts and stats
-- [ ] UNO Flip mode
+- [ ] Switch mode
 - [ ] Tournament brackets
 
 ## 📝 License
@@ -275,7 +271,7 @@ Found a bug? Want to add a feature? Pull requests welcome!
 
 ## 🎉 Have Fun!
 
-Enjoy playing UNO with your friends! Share your feedback and suggestions.
+Enjoy playing with your friends! Share your feedback and suggestions.
 
 ---
 

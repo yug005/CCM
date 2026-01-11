@@ -38,10 +38,11 @@ gameState.drawnCardIndex = null;
 let homeScreen, lobbyScreen, gameScreen, errorMessage;
 let playerNameInput, roomCodeInput, createRoomBtn, joinRoomBtn;
 let displayRoomCode, gameRoomCode, copyCodeBtn, playersList, startGameBtn, leaveLobbyBtn;
-let otherPlayers, deckPile, discardPile, colorIndicator, turnIndicator, playerHand, deckCount, drawCardBtn, sayUnoBtn;
+let otherPlayers, deckPile, discardPile, colorIndicator, turnIndicator, playerHand, deckCount, drawCardBtn, callClashBtn;
 let colorPickerModal, gameOverModal, gameOverContent, playAgainBtn, leaveGameBtn;
 let settingsToggle, settingsPanel, gameSettingsDisplay;
 let gameModeSelect;
+let gameModeHint;
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
@@ -79,6 +80,7 @@ document.addEventListener('DOMContentLoaded', function() {
   gameSettingsDisplay = document.getElementById('gameSettingsDisplay');
 
   gameModeSelect = document.getElementById('gameMode');
+  gameModeHint = document.getElementById('gameModeHint');
   
   displayRoomCode = document.getElementById('displayRoomCode');
   gameRoomCode = document.getElementById('gameRoomCode');
@@ -95,7 +97,7 @@ document.addEventListener('DOMContentLoaded', function() {
   playerHand = document.getElementById('playerHand');
   deckCount = document.getElementById('deckCount');
   drawCardBtn = document.getElementById('drawCardBtn');
-  sayUnoBtn = document.getElementById('sayUnoBtn');
+  callClashBtn = document.getElementById('callClashBtn');
   
   colorPickerModal = document.getElementById('colorPickerModal');
   gameOverModal = document.getElementById('gameOverModal');
@@ -104,7 +106,7 @@ document.addEventListener('DOMContentLoaded', function() {
   leaveGameBtn = document.getElementById('leaveGameBtn');
   
   // Load saved player name
-  const savedName = localStorage.getItem('unoPlayerName');
+  const savedName = localStorage.getItem('ccmPlayerName');
   if (savedName) {
     playerNameInput.value = savedName;
   }
@@ -185,14 +187,14 @@ function attachEventListeners() {
     }, 400);
   });
   
-  // Say UNO
-  sayUnoBtn.addEventListener('click', () => {
-    if (!canSayUnoNow()) {
-      showNotification('You can only say UNO on your turn with exactly 2 cards', 'warning');
+  // Call CLASH
+  callClashBtn.addEventListener('click', () => {
+    if (!canCallClashNow()) {
+      showNotification('You can only call CLASH on your turn with exactly 2 cards', 'warning');
       return;
     }
 
-    socket.emit('sayUno');
+    socket.emit('callClash');
   });
 
   // Play again
@@ -244,7 +246,7 @@ function attachEventListeners() {
   
   // Save player name
   playerNameInput.addEventListener('blur', () => {
-    localStorage.setItem('unoPlayerName', playerNameInput.value.trim());
+    localStorage.setItem('ccmPlayerName', playerNameInput.value.trim());
   });
 
   if (settingsToggle && settingsPanel) {
@@ -262,6 +264,12 @@ function attachEventListeners() {
       settingsToggle.style.display = isFlip ? 'none' : 'block';
       if (isFlip) {
         settingsPanel.style.display = 'none';
+      }
+
+      if (gameModeHint) {
+        gameModeHint.textContent = isFlip
+          ? 'Switch: two-sided deck • variations disabled'
+          : 'Classic: standard rules • optional variations';
       }
     };
     gameModeSelect.addEventListener('change', applyModeUI);
@@ -476,15 +484,15 @@ socket.on('cardsDrawn', ({ playerId, playerName, count, reason }) => {
   }
 });
 
-socket.on('unoSaid', ({ playerId, playerName }) => {
+socket.on('clashCalled', ({ playerId, playerName }) => {
   if (playerId === gameState.playerId) {
-    showNotification('You said UNO!', 'success');
+    showNotification('You called CLASH!', 'success');
   } else {
-    showNotification(`${playerName} said UNO!`, 'info');
+    showNotification(`${playerName} called CLASH!`, 'info');
   }
 });
 
-socket.on('unoChallenged', ({ challengerId, challengerName, targetId, targetName, penaltyCount }) => {
+socket.on('callChallenged', ({ challengerId, challengerName, targetId, targetName, penaltyCount }) => {
   const resolvedTargetName = targetName || getPlayerNameById(targetId) || 'a player';
   const penalty = penaltyCount || 4;
 
@@ -512,7 +520,15 @@ socket.on('playerLeft', ({ playerId, playerName }) => {
 });
 
 socket.on('gameError', ({ message }) => {
-  showError(message);
+  const msg = message || 'Something went wrong';
+
+  // In-game errors should be visible even when the home screen is not active.
+  showNotification(msg, 'error');
+
+  // Keep the home-screen error banner behavior for join/create validation.
+  if (homeScreen && homeScreen.classList.contains('active')) {
+    showError(msg);
+  }
 });
 
 // UI Functions
@@ -528,6 +544,12 @@ function showScreen(screenId) {
 }
 
 function showError(message) {
+  // If the home-screen banner isn't visible (e.g. during gameplay), fall back to a toast.
+  if (!homeScreen || !homeScreen.classList.contains('active')) {
+    showNotification(message, 'error');
+    return;
+  }
+
   errorMessage.textContent = message;
   errorMessage.style.display = 'block';
   setTimeout(() => {
@@ -589,12 +611,12 @@ function updateLobbyFromGameState(state) {
     const lines = [];
     const mode = state.settings.gameMode || 'classic';
     if (mode === 'flip') {
-      gameSettingsDisplay.textContent = 'Mode: UNO Flip';
+      gameSettingsDisplay.textContent = 'Mode: Switch';
     } else {
-      lines.push('Mode: Normal UNO');
+      lines.push('Mode: Classic');
       if (state.settings.stackPlusTwoFour) lines.push('Stacking +2/+4: ON');
       if (state.settings.sevenZeroRule) lines.push('7-0 Rule: ON');
-      gameSettingsDisplay.textContent = lines.length ? lines.join(' • ') : 'Mode: Normal UNO • Game variations: OFF';
+      gameSettingsDisplay.textContent = lines.length ? lines.join(' • ') : 'Mode: Classic • Game variations: OFF';
     }
   }
 }
@@ -617,7 +639,7 @@ function updateGameState(state) {
     const display = getCardDisplay(state.topCard);
     discardPile.innerHTML = `
       <div class="discard-top">
-        <div class="uno-card ${colorClass}">
+        <div class="cc-card ${colorClass}">
           <div class="card-corner top-left">${display.corner}</div>
           <div class="card-corner bottom-right">${display.corner}</div>
           <div class="card-center">
@@ -718,12 +740,12 @@ function renderTurnOrder(state) {
     const miniHand = createMiniHandEl(Number(player.cardCount) || 0);
     playerDiv.appendChild(miniHand);
 
-    // UNO status (no numeric card counts)
+    // Call status (no numeric card counts)
     if (player.cardCount === 1) {
-      if (player.hasCalledUno) {
+      if (player.hasCalledClash) {
         const badge = document.createElement('div');
-        badge.className = 'uno-badge uno-ok';
-        badge.textContent = 'UNO';
+        badge.className = 'call-badge call-ok';
+        badge.textContent = 'CC';
         playerDiv.appendChild(badge);
       } else {
         if (player.id !== gameState.playerId) {
@@ -733,7 +755,7 @@ function renderTurnOrder(state) {
           catchBtn.textContent = 'CATCH';
           catchBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            socket.emit('challengeUno', { targetPlayerId: player.id });
+            socket.emit('challengeCall', { targetPlayerId: player.id });
           });
           playerDiv.appendChild(catchBtn);
         }
@@ -779,15 +801,15 @@ function createMiniHandEl(cardCount) {
   return miniHand;
 }
 
-function canSayUnoNow() {
+function canCallClashNow() {
   if (!Array.isArray(gameState.currentHand)) return false;
   if (gameState.currentHand.length === 1) return true;
   return !!(gameState.isMyTurn && gameState.currentHand.length === 2);
 }
 
 function updateActionButtons() {
-  if (sayUnoBtn) {
-    sayUnoBtn.disabled = !canSayUnoNow();
+  if (callClashBtn) {
+    callClashBtn.disabled = !canCallClashNow();
   }
 
   if (drawCardBtn) {
@@ -835,7 +857,7 @@ function renderPlayerHand(state) {
   gameState.currentHand.forEach((card, index) => {
     const cardDiv = document.createElement('div');
     const colorClass = card.color === 'wild' ? 'black' : card.color;
-    cardDiv.className = `uno-card ${colorClass}`;
+    cardDiv.className = `cc-card ${colorClass}`;
     
     console.log(`  Card ${index}:`, card.color, card.value);
     
@@ -902,12 +924,22 @@ function getCardDisplay(card) {
   switch (card.value) {
     case 'wild':
       return { main: 'WILD', sub: '🎨', corner: 'W' };
+    case 'wd2':
+      return { main: 'WD2', sub: '+2', corner: 'WD2' };
+    case 'wdc':
+      return { main: 'WDC', sub: '🎨', corner: 'WDC' };
     case '+4':
       return { main: '+4', sub: '+4', corner: '+4' };
     case '+2':
       return { main: '+2', sub: '+2', corner: '+2' };
+    case 'draw1':
+      return { main: 'DRAW 1', sub: '+1', corner: '+1' };
+    case 'draw5':
+      return { main: 'DRAW 5', sub: '+5', corner: '+5' };
     case 'skip':
       return { main: 'SKIP', sub: '⊘', corner: '⊘' };
+    case 'skipEveryone':
+      return { main: 'SKIP ALL', sub: '⟲', corner: 'ALL' };
     case 'reverse':
       return { main: 'REV', sub: '⇄', corner: '⇄' };
     case 'flip':
@@ -969,17 +1001,17 @@ function animateCardFlight({ fromEl, toEl, card, durationMs = 380, rotateDeg = 0
 
     // Build a flying element:
     // - If we know the card, show its face.
-    // - If we don't (other players drawing), show a generic UNO back.
+    // - If we don't (other players drawing), show a generic CC back.
     let flight;
     if (card) {
       flight = document.createElement('div');
       const colorClass = card.color === 'wild' ? 'black' : (card.color || 'black');
-      flight.className = `uno-card ${colorClass} card-flight`;
+      flight.className = `cc-card ${colorClass} card-flight`;
       flight.innerHTML = createCardHTML(card);
     } else {
       flight = document.createElement('div');
       flight.className = 'card-back card-flight';
-      flight.textContent = 'UNO';
+      flight.textContent = 'CC';
     }
 
     flight.style.width = `${fromRect.width}px`;
@@ -1029,7 +1061,6 @@ function displayGameOver(loser, stats) {
   const loserName = loser.name;
   
   gameOverContent.innerHTML = `
-    <h2>🎉 Game Over! 🎉</h2>
     <div class="game-over-stats">
       <p class="loser-announcement">${loserName} is the LOSER! 😅</p>
       <p class="winner-announcement">Everyone else WINS! 🏆</p>

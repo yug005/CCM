@@ -1,6 +1,6 @@
-# 🚀 Deployment Guide - UNO Multiplayer
+# 🚀 Deployment Guide - Color Clash Multiplayer
 
-Your UNO game is now **production-ready**! Here's how to deploy it online so you can play with friends from anywhere.
+Your game is now **production-ready**! Here's how to deploy it online so you can play with friends from anywhere.
 
 ## 🎯 Quick Deploy Options (All FREE!)
 
@@ -22,7 +22,7 @@ Your UNO game is now **production-ready**! Here's how to deploy it online so you
 
 3. **Configure**:
    ```
-   Name: uno-multiplayer (or your choice)
+   Name: ccm (or your choice)
    Environment: Node
    Build Command: npm install
    Start Command: npm start
@@ -31,7 +31,7 @@ Your UNO game is now **production-ready**! Here's how to deploy it online so you
 
 4. **Deploy**: Click "Create Web Service"
 
-5. **Get Your URL**: Render will give you a URL like `https://uno-multiplayer-xxx.onrender.com`
+5. **Get Your URL**: Render will give you a URL like `https://ccm-xxx.onrender.com`
 
 ⚠️ **Free tier sleeps after 15 min of inactivity** - first request may take 30 seconds to wake up.
 
@@ -116,7 +116,7 @@ Recommended approaches:
 Once deployed, share your URL:
 
 ```
-🎴 UNO Game Room!
+🎴 Color Clash Room!
 Join here: https://your-app-url.com
 
 1. Enter your name
@@ -219,7 +219,7 @@ If deployment fails:
 
 **🎉 Once deployed, create a room and invite your friends to play!**
 
-Your production-ready UNO game features:
+Your production-ready game features:
 - ✨ Smooth card animations
 - 🎨 Professional UI/UX
 - 📱 Mobile responsive

@@ -1,4 +1,4 @@
-// UNO Game Logic - Server-authoritative
+// Color Clash Game Logic - Server-authoritative
 
 class Game {
   constructor(roomCode, settings = {}) {
@@ -10,16 +10,19 @@ class Game {
     this.currentPlayerIndex = 0;
     this.direction = 1; // 1 = clockwise, -1 = counter-clockwise
     this.currentColor = null;
-    this.currentSide = 'light'; // for UNO Flip mode
+    this.currentSide = 'light'; // for Switch mode
     this.hasStarted = false;
     this.isGameOver = false;
     this.loser = null;
     
+    const resolvedMode = settings.gameMode || 'classic';
+
     // Game settings (configurable variations)
+    // NOTE: Variations are not allowed in Switch mode.
     this.settings = {
-      stackPlusTwoFour: settings.stackPlusTwoFour || false,
-      sevenZeroRule: settings.sevenZeroRule || false,
-      gameMode: settings.gameMode || 'classic',
+      stackPlusTwoFour: resolvedMode === 'flip' ? false : (settings.stackPlusTwoFour || false),
+      sevenZeroRule: resolvedMode === 'flip' ? false : (settings.sevenZeroRule || false),
+      gameMode: resolvedMode,
       turnTimer: settings.turnTimer || 0, // 0 = no timer
       ...settings
     };
@@ -28,11 +31,11 @@ class Game {
     // { count: number, lastValue: '+2' | '+4' }
     this.drawStack = null;
     
-    // UNO tracking
-    this.unoCalled = new Set(); // Players who properly called UNO for their current 1-card state
-    this.unoVulnerable = new Set(); // Players who ended a turn with 1 card and did NOT call UNO
+    // Call tracking
+    this.clashCalled = new Set(); // Players who properly called CLASH for their current 1-card state
+    this.clashVulnerable = new Set(); // Players who ended a turn with 1 card and did NOT call CLASH
 
-    // Draw-then-play flow (UNO rule): after drawing, you may play ONLY the drawn card (if playable) or pass.
+    // Draw-then-play flow: after drawing, you may play ONLY the drawn card (if playable) or pass.
     this.pendingDraw = null; // { playerId, cardIndex, canPlay }
   }
 
@@ -81,19 +84,19 @@ class Game {
     };
   }
 
-  updateUnoStateForPlayer(player) {
-    // UNO state only matters while the player has exactly 1 card.
+  updateCallStateForPlayer(player) {
+    // Call state only matters while the player has exactly 1 card.
     if (!player) return;
     if (player.hand.length === 1) {
-      if (this.unoCalled.has(player.id)) {
-        this.unoVulnerable.delete(player.id);
+      if (this.clashCalled.has(player.id)) {
+        this.clashVulnerable.delete(player.id);
       }
       return;
     }
 
-    // Once hand is not 1, clear UNO-related state.
-    this.unoCalled.delete(player.id);
-    this.unoVulnerable.delete(player.id);
+    // Once hand is not 1, clear call-related state.
+    this.clashCalled.delete(player.id);
+    this.clashVulnerable.delete(player.id);
   }
 
   // Add player to game
@@ -124,8 +127,8 @@ class Game {
     this.isGameOver = false;
     this.loser = null;
 
-    this.unoCalled = new Set();
-    this.unoVulnerable = new Set();
+    this.clashCalled = new Set();
+    this.clashVulnerable = new Set();
     this.pendingDraw = null;
 
     this.players.forEach(p => {
@@ -154,7 +157,7 @@ class Game {
     const mode = this.settings.gameMode || 'classic';
     const colors = ['red', 'blue', 'green', 'yellow'];
 
-    // UNO Flip: use two-sided cards (light/dark) and include flip action cards.
+    // Switch mode: 112 two-sided cards with Light + Dark faces.
     if (mode === 'flip') {
       const darkColorMap = {
         red: 'pink',
@@ -163,43 +166,58 @@ class Game {
         yellow: 'orange'
       };
 
-      const pushFlipCard = (lightCard) => {
-        const darkCard = {
-          ...lightCard,
-          color: darkColorMap[lightCard.color] || lightCard.color
-        };
+      const pushTwoSided = (lightCard, darkCard) => {
         this.deck.push({ light: lightCard, dark: darkCard });
       };
 
-      // Numbers 0-9 (mirror on dark side for now)
+      // Numbers 1-9 in each color, 2 copies each.
       colors.forEach(color => {
-        pushFlipCard({ color, value: '0', type: 'number' });
+        const darkColor = darkColorMap[color];
         for (let i = 1; i <= 9; i++) {
-          pushFlipCard({ color, value: i.toString(), type: 'number' });
-          pushFlipCard({ color, value: i.toString(), type: 'number' });
+          for (let c = 0; c < 2; c++) {
+            pushTwoSided(
+              { color, value: i.toString(), type: 'number' },
+              { color: darkColor, value: i.toString(), type: 'number' }
+            );
+          }
         }
       });
 
-      // Action cards (Skip, Reverse, +2, Flip)
+      // Action cards: 2 per color.
+      // Light: draw1, reverse, skip, flip
+      // Dark:  draw5, reverse, skipEveryone, flip
       colors.forEach(color => {
+        const darkColor = darkColorMap[color];
         for (let i = 0; i < 2; i++) {
-          pushFlipCard({ color, value: 'skip', type: 'action' });
-          pushFlipCard({ color, value: 'reverse', type: 'action' });
-          pushFlipCard({ color, value: '+2', type: 'action' });
-          pushFlipCard({ color, value: 'flip', type: 'action' });
+          pushTwoSided(
+            { color, value: 'draw1', type: 'action' },
+            { color: darkColor, value: 'draw5', type: 'action' }
+          );
+          pushTwoSided(
+            { color, value: 'reverse', type: 'action' },
+            { color: darkColor, value: 'reverse', type: 'action' }
+          );
+          pushTwoSided(
+            { color, value: 'skip', type: 'action' },
+            { color: darkColor, value: 'skipEveryone', type: 'action' }
+          );
+          pushTwoSided(
+            { color, value: 'flip', type: 'action' },
+            { color: darkColor, value: 'flip', type: 'action' }
+          );
         }
       });
 
       // Wild cards
       for (let i = 0; i < 4; i++) {
-        this.deck.push({
-          light: { color: 'wild', value: 'wild', type: 'wild' },
-          dark: { color: 'wild', value: 'wild', type: 'wild' }
-        });
-        this.deck.push({
-          light: { color: 'wild', value: '+4', type: 'wild' },
-          dark: { color: 'wild', value: '+4', type: 'wild' }
-        });
+        pushTwoSided(
+          { color: 'wild', value: 'wild', type: 'wild' },
+          { color: 'wild', value: 'wild', type: 'wild' }
+        );
+        pushTwoSided(
+          { color: 'wild', value: 'wd2', type: 'wild' },
+          { color: 'wild', value: 'wdc', type: 'wild' }
+        );
       }
 
       this.shuffleDeck();
@@ -250,27 +268,21 @@ class Game {
       }
     });
     
-    // Place first card on discard pile (ensure it's not a wild +4)
+    // Place first card on discard pile (avoid wilds which require color selection)
     let firstCard;
     do {
       firstCard = this.deck.pop();
-    } while (this.getActiveCardFace(firstCard).value === '+4');
+    } while (this.getActiveCardFace(firstCard).type === 'wild');
     
     this.discardPile.push(firstCard);
     const firstFace = this.getActiveCardFace(firstCard);
     this.currentColor = firstFace.color === 'wild' ? 'red' : firstFace.color;
     
-    // Handle first card effects
-    if (firstFace.value === 'skip') {
+    // Handle first card effects as if played.
+    const firstEffect = this.handleCardEffect(firstCard, this.getCurrentPlayer(), { isSetup: true });
+    const steps = typeof firstEffect.advanceBy === 'number' ? firstEffect.advanceBy : 1;
+    for (let i = 0; i < steps; i++) {
       this.nextPlayer();
-    } else if (firstFace.value === 'reverse') {
-      this.direction *= -1;
-    } else if (firstFace.value === '+2') {
-      const nextPlayer = this.getNextPlayer();
-      this.drawCardsForPlayer(nextPlayer, 2);
-      this.nextPlayer();
-    } else if (firstFace.value === 'flip' && (this.settings.gameMode || 'classic') === 'flip') {
-      this.flipSide();
     }
   }
 
@@ -319,7 +331,7 @@ class Game {
       this.currentPlayerIndex = (this.currentPlayerIndex + this.direction + this.players.length) % this.players.length;
     }
     
-    // UNO call/vulnerability is tracked by hand-size transitions.
+    // Call/vulnerability is tracked by hand-size transitions.
   }
 
   getActiveCardFace(card) {
@@ -336,7 +348,7 @@ class Game {
     if (!face || !currentFace) return false;
 
     // If stacking is active, only +2/+4 may be played to continue the stack.
-    if (this.drawStack && this.settings.stackPlusTwoFour) {
+    if ((this.settings.gameMode || 'classic') !== 'flip' && this.drawStack && this.settings.stackPlusTwoFour) {
       // Enforce same-type stacking: +2 stacks with +2, +4 stacks with +4.
       return face.value === this.drawStack.lastValue;
     }
@@ -373,8 +385,8 @@ class Game {
       this.pendingDraw = null;
     }
     
-    // If a draw stack is active, you may only respond with +2/+4.
-    if (this.drawStack && this.settings.stackPlusTwoFour) {
+    // If a draw stack is active, you may only respond with the same draw card.
+    if ((this.settings.gameMode || 'classic') !== 'flip' && this.drawStack && this.settings.stackPlusTwoFour) {
       if (!(cardFace.value === '+2' || cardFace.value === '+4')) {
         throw new Error('You must stack the same draw card or draw the penalty');
       }
@@ -387,7 +399,9 @@ class Game {
       throw new Error('Cannot play this card');
     }
     
-    // Validate Wild +4 (can only be played if no other valid card)
+    // Validate wild legality rules.
+    // Classic +4: only if no other valid card (official).
+    // Switch mode: Wild Draw Two / Wild Draw Color: only if no card of current color.
     if (cardFace.value === '+4') {
       // When stacking is active and we're responding to a +4 stack, allow +4 regardless
       // of whether other playable cards exist (house rule stacking behavior).
@@ -406,6 +420,17 @@ class Game {
       }
       }
     }
+
+    if ((this.settings.gameMode || 'classic') === 'flip' && (cardFace.value === 'wd2' || cardFace.value === 'wdc')) {
+      const hasCurrentColor = player.hand.some((c, i) => {
+        if (i === cardIndex) return false;
+        const f = this.getActiveCardFace(c);
+        return f && f.color === this.currentColor;
+      });
+      if (hasCurrentColor) {
+        throw new Error('Cannot play this Wild Draw card when you have a card of the current color');
+      }
+    }
     
     // Wild cards require color choice
     if (cardFace.type === 'wild' && !chosenColor) {
@@ -419,24 +444,28 @@ class Game {
     // Set current color
     if (cardFace.type === 'wild') {
       this.currentColor = chosenColor;
+      // Persist chosen color on the physical card so it can be restored if it becomes top again.
+      try { card._chosenColor = chosenColor; } catch (e) { /* ignore */ }
     } else {
       this.currentColor = cardFace.color;
     }
     
     // Handle card effects (and how many turns to advance)
-    const { effect, advanceBy } = this.handleCardEffect(card, player, extra);
+    const effectResult = this.handleCardEffect(card, player, extra);
+    let effect = effectResult.effect;
+    const advanceBy = effectResult.advanceBy;
 
-    // If the player now has exactly 1 card, they must have called UNO earlier (at 2 cards)
+    // If the player now has exactly 1 card, they must have called earlier (at 2 cards)
     // or they become challengeable.
     if (player.hand.length === 1) {
-      if (!this.unoCalled.has(player.id)) {
-        this.unoVulnerable.add(player.id);
+      if (!this.clashCalled.has(player.id)) {
+        this.clashVulnerable.add(player.id);
       } else {
-        this.unoVulnerable.delete(player.id);
+        this.clashVulnerable.delete(player.id);
       }
     } else {
-      // If they didn't land on 1 card, clear UNO state.
-      this.updateUnoStateForPlayer(player);
+      // If they didn't land on 1 card, clear call state.
+      this.updateCallStateForPlayer(player);
     }
     
     // Check if player is safe (finished all cards)
@@ -445,7 +474,7 @@ class Game {
       player.isSafe = true;
       this.safePlayers.push({ id: player.id, name: player.name });
       playerSafe = true;
-      this.updateUnoStateForPlayer(player);
+      this.updateCallStateForPlayer(player);
     }
     
     // Move to next player (some effects advance an extra step)
@@ -456,12 +485,12 @@ class Game {
 
     // If stacking is enabled and the next player cannot respond to the stack,
     // auto-apply the penalty draw and advance again.
-    if (this.drawStack && this.settings.stackPlusTwoFour) {
+    if ((this.settings.gameMode || 'classic') !== 'flip' && this.drawStack && this.settings.stackPlusTwoFour) {
       const autoDrawn = this.autoResolveDrawStackIfForced();
       if (autoDrawn) {
         // Ensure effect is always an object when we append.
-        const base = effect && typeof effect === 'object' ? effect : {};
-        base.autoDrawn = autoDrawn;
+        if (!effect || typeof effect !== 'object') effect = {};
+        effect.autoDrawn = autoDrawn;
       }
     }
     
@@ -484,6 +513,7 @@ class Game {
     const effect = {};
     let advanceBy = 1;
     const face = this.getActiveCardFace(card);
+    const mode = this.settings.gameMode || 'classic';
     
     switch (face.value) {
       case 'skip':
@@ -530,15 +560,68 @@ class Game {
         }
         break;
 
+      case 'draw1':
+        // Switch mode (Light): next player draws 1 and is skipped.
+        this.drawCardsForPlayer(nextPlayer, 1);
+        effect.drawn = { playerId: nextPlayer.id, playerName: nextPlayer.name, count: 1, reason: 'draw1' };
+        advanceBy = 2;
+        break;
+
+      case 'draw5':
+        // Switch mode (Dark): next player draws 5 and is skipped.
+        this.drawCardsForPlayer(nextPlayer, 5);
+        effect.drawn = { playerId: nextPlayer.id, playerName: nextPlayer.name, count: 5, reason: 'draw5' };
+        advanceBy = 2;
+        break;
+
+      case 'skipEveryone':
+        // Switch mode (Dark): all other players are skipped and the player plays again.
+        advanceBy = 0;
+        break;
+
+      case 'wd2':
+        // Switch mode (Light): choose color; next player draws 2 and is skipped.
+        this.drawCardsForPlayer(nextPlayer, 2);
+        effect.drawn = { playerId: nextPlayer.id, playerName: nextPlayer.name, count: 2, reason: 'wd2' };
+        advanceBy = 2;
+        break;
+
+      case 'wdc': {
+        // Switch mode (Dark): choose color; next player draws until they draw that color, then is skipped.
+        const targetColor = this.currentColor;
+        let drawnCount = 0;
+        while (true) {
+          if (this.deck.length === 0) {
+            this.reshuffleDiscardPile();
+          }
+          if (this.deck.length === 0) break;
+
+          const drawn = this.deck.pop();
+          nextPlayer.hand.push(drawn);
+          drawnCount += 1;
+
+          const drawnFace = this.getActiveCardFace(drawn);
+          if (drawnFace && drawnFace.color === targetColor) {
+            break;
+          }
+        }
+        this.updateCallStateForPlayer(nextPlayer);
+        effect.drawn = { playerId: nextPlayer.id, playerName: nextPlayer.name, count: drawnCount, reason: 'wdc' };
+        advanceBy = 2;
+        break;
+      }
+
       case 'flip':
-        if ((this.settings.gameMode || 'classic') === 'flip') {
-          this.flipSide();
+        if (mode === 'flip') {
+          this.flipAll();
           effect.flipped = { side: this.currentSide };
+          // Continue to next player after flip.
+          advanceBy = 1;
         }
         break;
         
       case '7':
-        if (this.settings.sevenZeroRule) {
+        if (mode !== 'flip' && this.settings.sevenZeroRule) {
           // Simplified: swap hands with next active player
           const other = nextPlayer;
           const tmp = player.hand;
@@ -549,7 +632,7 @@ class Game {
         break;
         
       case '0':
-        if (this.settings.sevenZeroRule) {
+        if (mode !== 'flip' && this.settings.sevenZeroRule) {
           // Rotate all active players' hands in the current direction
           const active = this.players.filter(p => !p.isSafe);
           if (active.length >= 2) {
@@ -577,15 +660,26 @@ class Game {
     };
   }
 
-  flipSide() {
+  // Switch mode: flip hands + draw pile + discard pile.
+  // We model the physical flip by toggling the active side and reversing the piles
+  // (top becomes bottom).
+  flipAll() {
     this.currentSide = this.currentSide === 'light' ? 'dark' : 'light';
-    const top = this.discardPile[this.discardPile.length - 1];
-    const topFace = this.getActiveCardFace(top);
-    if (topFace && topFace.type === 'wild') {
-      // keep chosen color if it matches; otherwise default
-      if (!this.currentColor) this.currentColor = 'red';
-    } else if (topFace) {
-      this.currentColor = topFace.color;
+
+    // Flip piles (top becomes bottom)
+    this.deck.reverse();
+    this.discardPile.reverse();
+
+    const topRaw = this.discardPile[this.discardPile.length - 1];
+    const topFace = this.getActiveCardFace(topRaw);
+    if (topFace) {
+      if (topFace.type === 'wild') {
+        // Restore chosen color if we have it; otherwise keep currentColor.
+        const stored = topRaw && topRaw._chosenColor;
+        if (stored) this.currentColor = stored;
+      } else {
+        this.currentColor = topFace.color;
+      }
     }
   }
 
@@ -600,7 +694,7 @@ class Game {
       }
     }
 
-    this.updateUnoStateForPlayer(player);
+    this.updateCallStateForPlayer(player);
   }
 
   // Draw a card
@@ -620,8 +714,10 @@ class Game {
 
     const currentCard = this.discardPile[this.discardPile.length - 1];
 
+    const mode = this.settings.gameMode || 'classic';
+
     // If stacking is active, drawing means taking the full penalty.
-    if (this.drawStack && this.settings.stackPlusTwoFour) {
+    if (mode !== 'flip' && this.drawStack && this.settings.stackPlusTwoFour) {
       const count = this.drawStack.count || 0;
       if (count <= 0) {
         this.drawStack = null;
@@ -633,10 +729,13 @@ class Game {
       }
     }
 
-    // House rule: only draw if you have no playable card.
-    const hasPlayableCard = player.hand.some(c => this.canPlayCard(c, currentCard));
-    if (hasPlayableCard) {
-      throw new Error('You have a playable card. You cannot draw');
+    // Switch mode: you may choose to draw even if you have a playable card.
+    // Classic: keep existing house rule.
+    if (mode !== 'flip') {
+      const hasPlayableCard = player.hand.some(c => this.canPlayCard(c, currentCard));
+      if (hasPlayableCard) {
+        throw new Error('You have a playable card. You cannot draw');
+      }
     }
     
     if (this.deck.length === 0) {
@@ -648,7 +747,7 @@ class Game {
     }
 
     player.hand.push(this.deck.pop());
-    this.updateUnoStateForPlayer(player);
+    this.updateCallStateForPlayer(player);
 
     const drawnCardIndex = player.hand.length - 1;
     const drawnCard = player.hand[drawnCardIndex];
@@ -690,14 +789,14 @@ class Game {
     this.shuffleDeck();
   }
 
-  // Say UNO
-  sayUno(playerId) {
+  // Call CLASH
+  callClash(playerId) {
     const player = this.players.find(p => p.id === playerId);
     if (!player) return;
 
     // Support both common flows:
-    // - "Early" UNO at 2 cards (on your turn)
-    // - Standard UNO at 1 card (after you play down to 1), while you are vulnerable
+    // - "Early" call at 2 cards (on your turn)
+    // - Standard call at 1 card (after you play down to 1), while you are vulnerable
 
     if (player.hand.length === 2) {
       const currentPlayer = this.getCurrentPlayer();
@@ -705,34 +804,34 @@ class Game {
         throw new Error('Not your turn');
       }
 
-      this.unoCalled.add(playerId);
-      this.unoVulnerable.delete(playerId);
+      this.clashCalled.add(playerId);
+      this.clashVulnerable.delete(playerId);
       return;
     }
 
     if (player.hand.length === 1) {
-      if (!this.unoVulnerable.has(playerId)) {
-        throw new Error('You cannot say UNO right now');
+      if (!this.clashVulnerable.has(playerId)) {
+        throw new Error('You cannot call CLASH right now');
       }
 
-      this.unoCalled.add(playerId);
-      this.unoVulnerable.delete(playerId);
+      this.clashCalled.add(playerId);
+      this.clashVulnerable.delete(playerId);
       return;
     }
 
-    throw new Error('You can only say UNO when you have 1 or 2 cards');
+    throw new Error('You can only call CLASH when you have 1 or 2 cards');
   }
 
-  // Challenge UNO (penalize player who didn't call UNO with 1 card)
-  challengeUno(targetPlayerId) {
+  // Challenge call (penalize player who didn't call CLASH with 1 card)
+  challengeCall(targetPlayerId) {
     const target = this.players.find(p => p.id === targetPlayerId);
     if (!target) return false;
     
-    // If player has 1 card and didn't call UNO
+    // If player has 1 card and didn't call CLASH
     if (
       target.hand.length === 1 &&
-      this.unoVulnerable.has(targetPlayerId) &&
-      !this.unoCalled.has(targetPlayerId)
+      this.clashVulnerable.has(targetPlayerId) &&
+      !this.clashCalled.has(targetPlayerId)
     ) {
       this.drawCardsForPlayer(target, 4); // Penalty: draw 4 cards
       return true;
@@ -794,7 +893,7 @@ class Game {
         name: p.name,
         cardCount: p.hand.length,
         isSafe: p.isSafe,
-        hasCalledUno: this.unoCalled.has(p.id),
+        hasCalledClash: this.clashCalled.has(p.id),
         wins: typeof p.wins === 'number' ? p.wins : 0
       })),
       safePlayers: this.safePlayers,

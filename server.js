@@ -256,6 +256,17 @@ io.on('connection', (socket) => {
           reason: result.effect.drawn.reason
         });
       }
+
+      // If stacking is enabled and the next player couldn't respond, the server may auto-draw
+      // the stack penalty; broadcast that too.
+      if (result.effect && result.effect.autoDrawn) {
+        io.to(playerData.roomCode).emit('cardsDrawn', {
+          playerId: result.effect.autoDrawn.playerId,
+          playerName: result.effect.autoDrawn.playerName,
+          count: result.effect.autoDrawn.count,
+          reason: result.effect.autoDrawn.reason
+        });
+      }
       
       // Check if player is safe (finished their cards)
       if (result.playerSafe) {
@@ -330,8 +341,8 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Say UNO
-  socket.on('sayUno', () => {
+  // Call CLASH
+  socket.on('callClash', () => {
     const playerData = players.get(socket.id);
     if (!playerData) return;
     
@@ -339,8 +350,8 @@ io.on('connection', (socket) => {
     if (!game) return;
 
     try {
-      game.sayUno(socket.id);
-      io.to(playerData.roomCode).emit('unoSaid', {
+      game.callClash(socket.id);
+      io.to(playerData.roomCode).emit('clashCalled', {
         playerId: socket.id,
         playerName: playerData.playerName
       });
@@ -350,8 +361,8 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Challenge UNO (when someone forgets to say UNO)
-  socket.on('challengeUno', ({ targetPlayerId }) => {
+  // Challenge call (when someone forgets to call CLASH)
+  socket.on('challengeCall', ({ targetPlayerId }) => {
     const playerData = players.get(socket.id);
     if (!playerData) return;
     
@@ -359,10 +370,10 @@ io.on('connection', (socket) => {
     if (!game) return;
     
     try {
-      const penalized = game.challengeUno(targetPlayerId);
+      const penalized = game.challengeCall(targetPlayerId);
       if (penalized) {
         const targetPlayer = game.players.find(p => p.id === targetPlayerId);
-        io.to(playerData.roomCode).emit('unoChallenged', {
+        io.to(playerData.roomCode).emit('callChallenged', {
           challengerId: socket.id,
           challengerName: playerData.playerName,
           targetId: targetPlayerId,
@@ -374,7 +385,7 @@ io.on('connection', (socket) => {
           playerId: targetPlayerId,
           playerName: targetPlayer ? targetPlayer.name : undefined,
           count: 4,
-          reason: 'uno-penalty'
+          reason: 'call-penalty'
         });
 
         io.to(playerData.roomCode).emit('gameState', game.getGameState());
@@ -423,5 +434,5 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`UNO Server running on port ${PORT}`);
+  console.log(`Color Clash Server running on port ${PORT}`);
 });

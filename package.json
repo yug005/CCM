@@ -1,13 +1,13 @@
 {
-  "name": "uno-multiplayer",
+  "name": "color-clash-multiplayer",
   "version": "1.0.0",
-  "description": "Multiplayer UNO card game with custom rules",
+  "description": "Real-time multiplayer color-matching card game with custom rules",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
-  "keywords": ["uno", "multiplayer", "socket.io", "card-game"],
+  "keywords": ["color-clash", "multiplayer", "socket.io", "card-game"],
   "author": "",
   "license": "MIT",
   "dependencies": {

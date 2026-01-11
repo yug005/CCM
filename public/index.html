@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>UNO Multiplayer</title>
+  <title>Color Clash Multiplayer</title>
   <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
@@ -18,7 +18,7 @@
         <div class="loading-card green"></div>
         <div class="loading-card yellow"></div>
       </div>
-      <h2>Loading UNO...</h2>
+      <h2>Loading Color Clash...</h2>
       <div class="loading-bar">
         <div class="loading-progress"></div>
       </div>
@@ -27,7 +27,7 @@
 
   <div class="container">
     <div class="header">
-      <h1>🎴 UNO Multiplayer</h1>
+      <h1>🎴 Color Clash Multiplayer</h1>
       <p>Play with friends in real-time!</p>
     </div>
 
@@ -43,9 +43,10 @@
         <div class="form-group">
           <label for="gameMode">Game Mode</label>
           <select id="gameMode">
-            <option value="classic" selected>Normal UNO</option>
-            <option value="flip">UNO Flip</option>
+            <option value="classic" selected>Classic</option>
+            <option value="flip">Switch</option>
           </select>
+          <div class="form-hint" id="gameModeHint">Classic: standard rules • Switch: two-sided deck</div>
         </div>
 
         <div class="button-group">
@@ -128,7 +129,7 @@
       <div class="game-table">
         <div class="deck-area">
           <div class="deck-pile" id="deckPile">
-            <div class="card-back">UNO</div>
+            <div class="card-back">CC</div>
           </div>
           <div class="discard-pile" id="discardPile">
             <!-- Top card shown here -->
@@ -152,7 +153,7 @@
         
         <div class="player-actions">
           <button id="drawCardBtn" class="btn btn-action">Draw Card</button>
-          <button id="sayUnoBtn" class="btn btn-uno">Say UNO!</button>
+          <button id="callClashBtn" class="btn btn-call">Call CLASH!</button>
         </div>
       </div>
 
@@ -176,8 +177,10 @@
           <div id="gameOverContent">
             <!-- Winner/loser info -->
           </div>
-          <button id="playAgainBtn" class="btn btn-primary">Play Again</button>
-          <button id="leaveGameBtn" class="btn btn-secondary">Leave</button>
+          <div class="modal-actions">
+            <button id="playAgainBtn" class="btn btn-primary">Play Again</button>
+            <button id="leaveGameBtn" class="btn btn-secondary">Leave</button>
+          </div>
         </div>
       </div>
     </div>
