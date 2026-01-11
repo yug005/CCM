@@ -34,6 +34,9 @@ io.on('connection', (socket) => {
     const roomCode = generateRoomCode();
     const game = new Game(roomCode, settings);
     
+    // Rematch voting state (server-side only)
+    game.rematchVotes = new Set();
+    
     rooms.set(roomCode, game);
     players.set(socket.id, { roomCode, playerName });
     
@@ -80,6 +83,13 @@ io.on('connection', (socket) => {
     });
     
     io.to(roomCode).emit('gameState', game.getGameState());
+
+    if (game.rematchVotes instanceof Set) {
+      io.to(roomCode).emit('rematchVoteUpdate', {
+        votes: game.rematchVotes.size,
+        total: game.players.length
+      });
+    }
     console.log(`${playerName} joined room ${roomCode}`);
   });
 
@@ -98,6 +108,15 @@ io.on('connection', (socket) => {
     
     try {
       game.startGame();
+
+      // Clear any rematch votes when a round starts
+      if (game.rematchVotes instanceof Set) {
+        game.rematchVotes.clear();
+        io.to(playerData.roomCode).emit('rematchVoteUpdate', {
+          votes: 0,
+          total: game.players.length
+        });
+      }
       io.to(playerData.roomCode).emit('gameStarted');
       io.to(playerData.roomCode).emit('gameState', game.getGameState());
       
@@ -112,6 +131,59 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Rematch / play again (keep same room)
+  socket.on('playAgain', () => {
+    const playerData = players.get(socket.id);
+    if (!playerData) return;
+
+    const game = rooms.get(playerData.roomCode);
+    if (!game) return;
+
+    if (!game.isGameOver) {
+      socket.emit('gameError', { message: 'You can vote for rematch only after game over' });
+      return;
+    }
+
+    if (!(game.rematchVotes instanceof Set)) {
+      game.rematchVotes = new Set();
+    }
+
+    game.rematchVotes.add(socket.id);
+    io.to(playerData.roomCode).emit('rematchVoteUpdate', {
+      votes: game.rematchVotes.size,
+      total: game.players.length
+    });
+
+    if (game.players.length < 2) {
+      socket.emit('gameError', { message: 'Need at least 2 players to play again' });
+      return;
+    }
+
+    // Start rematch only when ALL current players vote yes.
+    const allVoted = game.players.every(p => game.rematchVotes.has(p.id));
+    if (!allVoted) return;
+
+    try {
+      game.restartRound();
+
+      game.rematchVotes.clear();
+
+      io.to(playerData.roomCode).emit('roundRestarted');
+      io.to(playerData.roomCode).emit('rematchVoteUpdate', {
+        votes: 0,
+        total: game.players.length
+      });
+      io.to(playerData.roomCode).emit('gameStarted');
+      io.to(playerData.roomCode).emit('gameState', game.getGameState());
+
+      game.players.forEach(player => {
+        io.to(player.id).emit('playerHand', game.getPlayerHand(player.id));
+      });
+    } catch (error) {
+      socket.emit('gameError', { message: error.message });
+    }
+  });
+
   // Leave room (without disconnect)
   socket.on('leaveRoom', () => {
     const playerData = players.get(socket.id);
@@ -120,6 +192,14 @@ io.on('connection', (socket) => {
     const game = rooms.get(playerData.roomCode);
     if (game) {
       game.removePlayer(socket.id);
+
+      if (game.rematchVotes instanceof Set) {
+        game.rematchVotes.delete(socket.id);
+        io.to(playerData.roomCode).emit('rematchVoteUpdate', {
+          votes: game.rematchVotes.size,
+          total: game.players.length
+        });
+      }
       socket.leave(playerData.roomCode);
 
       if (game.players.length === 0) {
@@ -146,7 +226,7 @@ io.on('connection', (socket) => {
     if (!game) return;
     
     try {
-      const result = game.playCard(socket.id, cardIndex, chosenColor);
+      const result = game.playCard(socket.id, cardIndex, chosenColor, {});
 
       // Clear any pending draw/pass state on the acting client.
       socket.emit('drawOption', { canPlayDrawnCard: false, drawnCardIndex: null });
@@ -164,6 +244,16 @@ io.on('connection', (socket) => {
           playerId: socket.id,
           playerName: playerData.playerName,
           card: result.cardPlayed
+        });
+      }
+
+      // If the played card forced someone to draw (+2/+4), broadcast it for animations.
+      if (result.effect && result.effect.drawn) {
+        io.to(playerData.roomCode).emit('cardsDrawn', {
+          playerId: result.effect.drawn.playerId,
+          playerName: result.effect.drawn.playerName,
+          count: result.effect.drawn.count,
+          reason: result.effect.drawn.reason
         });
       }
       
@@ -208,9 +298,12 @@ io.on('connection', (socket) => {
         drawnCardIndex: drawResult && typeof drawResult.drawnCardIndex === 'number' ? drawResult.drawnCardIndex : null
       });
       
-      io.to(playerData.roomCode).emit('cardDrawn', {
+      const drawnCount = drawResult && typeof drawResult.drawnCount === 'number' ? drawResult.drawnCount : 1;
+      io.to(playerData.roomCode).emit('cardsDrawn', {
         playerId: socket.id,
-        playerName: playerData.playerName
+        playerName: playerData.playerName,
+        count: drawnCount,
+        reason: (drawResult && drawResult.reason) ? drawResult.reason : 'draw'
       });
     } catch (error) {
       socket.emit('gameError', { message: error.message });
@@ -277,6 +370,13 @@ io.on('connection', (socket) => {
           penaltyCount: 4
         });
 
+        io.to(playerData.roomCode).emit('cardsDrawn', {
+          playerId: targetPlayerId,
+          playerName: targetPlayer ? targetPlayer.name : undefined,
+          count: 4,
+          reason: 'uno-penalty'
+        });
+
         io.to(playerData.roomCode).emit('gameState', game.getGameState());
 
         // Send updated hands (penalty affects only target, but keep clients consistent)
@@ -296,6 +396,13 @@ io.on('connection', (socket) => {
       const game = rooms.get(playerData.roomCode);
       if (game) {
         game.removePlayer(socket.id);
+        if (game.rematchVotes instanceof Set) {
+          game.rematchVotes.delete(socket.id);
+          io.to(playerData.roomCode).emit('rematchVoteUpdate', {
+            votes: game.rematchVotes.size,
+            total: game.players.length
+          });
+        }
         
         if (game.players.length === 0) {
           rooms.delete(playerData.roomCode);

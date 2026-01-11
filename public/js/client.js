@@ -22,6 +22,14 @@ let gameState = {
 
 let pendingWildCard = null;
 
+// UI animation state
+let pendingDrawFlight = null; // { prevHandLength: number }
+let lastRenderedHandLength = 0;
+let hasRenderedInitialHand = false;
+
+// Rematch voting UI state
+gameState.rematch = { voted: false, votes: 0, total: 0 };
+
 // Draw-then-play flow: if you draw a playable card, you may play ONLY that drawn card or pass.
 gameState.canPassAfterDraw = false;
 gameState.drawnCardIndex = null;
@@ -33,6 +41,7 @@ let displayRoomCode, gameRoomCode, copyCodeBtn, playersList, startGameBtn, leave
 let otherPlayers, deckPile, discardPile, colorIndicator, turnIndicator, playerHand, deckCount, drawCardBtn, sayUnoBtn;
 let colorPickerModal, gameOverModal, gameOverContent, playAgainBtn, leaveGameBtn;
 let settingsToggle, settingsPanel, gameSettingsDisplay;
+let gameModeSelect;
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
@@ -68,6 +77,8 @@ document.addEventListener('DOMContentLoaded', function() {
   settingsToggle = document.getElementById('settingsToggle');
   settingsPanel = document.getElementById('settingsPanel');
   gameSettingsDisplay = document.getElementById('gameSettingsDisplay');
+
+  gameModeSelect = document.getElementById('gameMode');
   
   displayRoomCode = document.getElementById('displayRoomCode');
   gameRoomCode = document.getElementById('gameRoomCode');
@@ -162,6 +173,9 @@ function attachEventListeners() {
       return;
     }
 
+    // Prepare to animate deck -> new card in hand once the updated hand arrives.
+    pendingDrawFlight = { prevHandLength: Array.isArray(gameState.currentHand) ? gameState.currentHand.length : 0 };
+
     socket.emit('drawCard');
 
     // Add draw animation
@@ -183,12 +197,19 @@ function attachEventListeners() {
 
   // Play again
   playAgainBtn.addEventListener('click', () => {
-    location.reload();
+    gameState.rematch.voted = true;
+    updateRematchUI();
+    socket.emit('playAgain');
   });
 
   // Leave game
   leaveGameBtn.addEventListener('click', () => {
-    location.reload();
+    socket.emit('leaveRoom');
+    // Reset a few local bits and go home
+    pendingWildCard = null;
+    gameState.currentHand = [];
+    gameState.isMyTurn = false;
+    showScreen('homeScreen');
   });
 
   // Color picker
@@ -196,20 +217,27 @@ function attachEventListeners() {
     btn.addEventListener('click', () => {
       const color = btn.dataset.color;
       if (pendingWildCard !== null) {
-        // Animate the wild card being played
-        const cardElement = playerHand.children[pendingWildCard];
-        if (cardElement) {
-          cardElement.classList.add('playing');
-        }
-        
-        setTimeout(() => {
-          socket.emit('playCard', { 
-            cardIndex: pendingWildCard, 
-            chosenColor: color 
+        const cardIndex = pendingWildCard;
+        pendingWildCard = null;
+        colorPickerModal.classList.remove('show');
+
+        // Smoothly animate the selected wild card to the discard pile, then emit.
+        const cardEl = playerHand && playerHand.children ? playerHand.children[cardIndex] : null;
+        const card = Array.isArray(gameState.currentHand) ? gameState.currentHand[cardIndex] : null;
+
+        animateCardFlight({
+          fromEl: cardEl,
+          toEl: discardPile,
+          card,
+          durationMs: 360,
+          rotateDeg: 18,
+          hideFromEl: true
+        }).finally(() => {
+          socket.emit('playCard', {
+            cardIndex,
+            chosenColor: color
           });
-          pendingWildCard = null;
-          colorPickerModal.classList.remove('show');
-        }, 200);
+        });
       }
     });
   });
@@ -224,6 +252,20 @@ function attachEventListeners() {
       const isHidden = settingsPanel.style.display === 'none' || settingsPanel.style.display === '';
       settingsPanel.style.display = isHidden ? 'block' : 'none';
     });
+  }
+
+  // Game mode toggles whether variations are shown/used.
+  if (gameModeSelect && settingsToggle && settingsPanel) {
+    const applyModeUI = () => {
+      const mode = gameModeSelect.value || 'classic';
+      const isFlip = mode === 'flip';
+      settingsToggle.style.display = isFlip ? 'none' : 'block';
+      if (isFlip) {
+        settingsPanel.style.display = 'none';
+      }
+    };
+    gameModeSelect.addEventListener('change', applyModeUI);
+    applyModeUI();
   }
   
   console.log('All event listeners attached');
@@ -261,6 +303,8 @@ socket.on('gameState', (state) => {
 socket.on('playerHand', (hand) => {
   console.log('✅ Received player hand:', hand);
   console.log('Hand length:', hand ? hand.length : 0);
+
+  const prevLen = lastRenderedHandLength;
   
   // FIX: Store hand and render immediately - no waiting for gameState
   gameState.currentHand = hand;
@@ -286,6 +330,36 @@ socket.on('playerHand', (hand) => {
   // ALWAYS render cards immediately when they arrive
   console.log('Rendering cards immediately...');
   renderPlayerHand(state);
+
+  // Animate NEW cards entering the hand from the deck (draw 1/2/4/penalties).
+  // Skip the initial deal so it doesn't spam 7 animations on game start.
+  if (hasRenderedInitialHand && Array.isArray(hand) && hand.length > prevLen) {
+    const fromEl = deckPile;
+    const added = hand.length - prevLen;
+
+    requestAnimationFrame(() => {
+      for (let i = 0; i < added; i++) {
+        const targetIndex = prevLen + i;
+        const toEl = playerHand && playerHand.children ? playerHand.children[targetIndex] : null;
+        const card = hand[targetIndex];
+        setTimeout(() => {
+          animateCardFlight({
+            fromEl,
+            toEl,
+            card,
+            durationMs: 420,
+            rotateDeg: -10
+          });
+        }, i * 120);
+      }
+    });
+  }
+
+  pendingDrawFlight = null;
+  lastRenderedHandLength = Array.isArray(hand) ? hand.length : 0;
+  if (!hasRenderedInitialHand && Array.isArray(hand) && hand.length > 0) {
+    hasRenderedInitialHand = true;
+  }
 });
 
 // After drawing, server tells us whether we can play the drawn card or should pass.
@@ -323,19 +397,82 @@ socket.on('gameStarted', () => {
   }, 100);
 });
 
+socket.on('roundRestarted', () => {
+  // Close game over modal + reset animation flags
+  if (gameOverModal) gameOverModal.classList.remove('show');
+  hasRenderedInitialHand = false;
+  pendingDrawFlight = null;
+
+  gameState.rematch = { voted: false, votes: 0, total: 0 };
+  updateRematchUI();
+});
+
+socket.on('rematchVoteUpdate', ({ votes, total }) => {
+  gameState.rematch.votes = typeof votes === 'number' ? votes : 0;
+  gameState.rematch.total = typeof total === 'number' ? total : 0;
+  updateRematchUI();
+});
+
 socket.on('cardPlayed', ({ playerId, playerName, card }) => {
   if (playerId === gameState.playerId) {
     showNotification(`You played ${formatCardName(card)}`, 'info');
   } else {
     showNotification(`${playerName || 'Someone'} played ${formatCardName(card)}`, 'info');
   }
+
+  // Animate OTHER players' played cards flying into the discard pile.
+  // (For me, we already animate on click before emitting.)
+  if (playerId && playerId !== gameState.playerId) {
+    const playerBox = document.querySelector(`.other-player[data-player-id="${playerId}"]`);
+    const fromEl = (playerBox && playerBox.querySelector('.mini-card-back:last-child')) || playerBox || deckPile;
+    animateCardFlight({
+      fromEl,
+      toEl: discardPile,
+      card,
+      durationMs: 420,
+      rotateDeg: 10
+    });
+  }
 });
 
-socket.on('cardDrawn', ({ playerId, playerName }) => {
+// Prefer the richer event with draw counts; keep the old one as a no-op for compatibility.
+socket.on('cardDrawn', () => {
+  // no-op (server now emits cardsDrawn)
+});
+
+socket.on('cardsDrawn', ({ playerId, playerName, count, reason }) => {
+  const drawCount = typeof count === 'number' && count > 0 ? count : 1;
+
+  // Notifications
   if (playerId === gameState.playerId) {
-    showNotification('You drew a card', 'info');
+    showNotification(drawCount === 1 ? 'You drew a card' : `You drew ${drawCount} cards`, 'info');
   } else {
-    showNotification(`${playerName || 'Someone'} drew a card`, 'info');
+    const who = playerName || 'Someone';
+    showNotification(drawCount === 1 ? `${who} drew a card` : `${who} drew ${drawCount} cards`, 'info');
+  }
+
+  // Animate deck -> player's area (self uses playerHand diff animation; others use mini-hand)
+  if (!playerId || playerId === gameState.playerId) return;
+
+  const playerBox = document.querySelector(`.other-player[data-player-id="${playerId}"]`);
+  const toEl = (playerBox && playerBox.querySelector('.mini-hand')) || playerBox;
+  if (!toEl) return;
+
+  if (playerBox) {
+    playerBox.classList.add('draw-highlight');
+    setTimeout(() => playerBox.classList.remove('draw-highlight'), 650);
+  }
+
+  for (let i = 0; i < drawCount; i++) {
+    setTimeout(() => {
+      animateCardFlight({
+        fromEl: deckPile,
+        toEl,
+        card: null,
+        durationMs: 380,
+        rotateDeg: -8
+      });
+    }, i * 120);
   }
 });
 
@@ -437,7 +574,8 @@ function updateLobbyFromGameState(state) {
     const div = document.createElement('div');
     div.className = 'player-item';
     const hostLabel = player.id === hostId ? ' (Host)' : '';
-    div.textContent = `${player.name}${hostLabel}`;
+    const wins = typeof player.wins === 'number' ? player.wins : 0;
+    div.textContent = `${player.name}${hostLabel}  ★${wins}`;
     playersList.appendChild(div);
   });
 
@@ -449,10 +587,15 @@ function updateLobbyFromGameState(state) {
 
   if (gameSettingsDisplay && state.settings) {
     const lines = [];
-    if (state.settings.stackPlusTwoFour) lines.push('Stacking +2/+4: ON');
-    if (state.settings.sevenZeroRule) lines.push('7-0 Rule: ON');
-    if (state.settings.jumpInRule) lines.push('Jump-in: ON');
-    gameSettingsDisplay.textContent = lines.length ? lines.join(' • ') : 'Game variations: OFF';
+    const mode = state.settings.gameMode || 'classic';
+    if (mode === 'flip') {
+      gameSettingsDisplay.textContent = 'Mode: UNO Flip';
+    } else {
+      lines.push('Mode: Normal UNO');
+      if (state.settings.stackPlusTwoFour) lines.push('Stacking +2/+4: ON');
+      if (state.settings.sevenZeroRule) lines.push('7-0 Rule: ON');
+      gameSettingsDisplay.textContent = lines.length ? lines.join(' • ') : 'Mode: Normal UNO • Game variations: OFF';
+    }
   }
 }
 
@@ -461,6 +604,9 @@ function updateGameState(state) {
   gameState.lastCurrentColor = state.currentColor;
   gameState.lastCurrentPlayerId = state.currentPlayerId;
   gameState.lastPlayers = state.players;
+  gameState.lastSettings = state.settings;
+  gameState.drawStackCount = state.drawStackCount || 0;
+  gameState.drawStackType = state.drawStackType || null;
 
   // Update lobby UI from game state
   updateLobbyFromGameState(state);
@@ -470,19 +616,26 @@ function updateGameState(state) {
     const colorClass = state.topCard.color === 'wild' ? 'black' : state.topCard.color;
     const display = getCardDisplay(state.topCard);
     discardPile.innerHTML = `
-      <div class="uno-card ${colorClass}">
-        <div class="card-corner top-left">${display.corner}</div>
-        <div class="card-corner bottom-right">${display.corner}</div>
-        <div class="card-center">
-          <div class="card-value">${display.main}</div>
-          <div class="card-symbol">${display.sub}</div>
+      <div class="discard-top">
+        <div class="uno-card ${colorClass}">
+          <div class="card-corner top-left">${display.corner}</div>
+          <div class="card-corner bottom-right">${display.corner}</div>
+          <div class="card-center">
+            <div class="card-value">${display.main}</div>
+            <div class="card-symbol">${display.sub}</div>
+          </div>
         </div>
       </div>
     `;
-    discardPile.style.animation = 'none';
-    setTimeout(() => {
-      discardPile.style.animation = 'card-flip 0.4s';
-    }, 10);
+
+    // Flip animation (apply to the wrapper so it doesn't fight the pile spin)
+    const discardTop = discardPile.querySelector('.discard-top');
+    if (discardTop) {
+      discardTop.style.animation = 'none';
+      setTimeout(() => {
+        discardTop.style.animation = 'card-flip 0.4s';
+      }, 10);
+    }
   }
   
   // Update color indicator
@@ -541,6 +694,7 @@ function renderTurnOrder(state) {
   state.players.forEach((player, idx) => {
     const playerDiv = document.createElement('div');
     playerDiv.className = 'other-player';
+    playerDiv.dataset.playerId = player.id;
 
     if (player.id === state.currentPlayerId) {
       playerDiv.classList.add('active-turn');
@@ -554,11 +708,15 @@ function renderTurnOrder(state) {
       playerDiv.classList.add('me');
     }
 
+    const wins = typeof player.wins === 'number' ? player.wins : 0;
     const displayName = player.id === gameState.playerId ? `${player.name} (You)` : player.name;
     playerDiv.innerHTML = `
-      <div class="player-name">${displayName}</div>
-      <div class="card-count">${player.cardCount}</div>
+      <div class="player-name">${displayName} <span class="wins-badge">★${wins}</span></div>
     `;
+
+    // Face-down cards (visual representation of their hand size)
+    const miniHand = createMiniHandEl(Number(player.cardCount) || 0);
+    playerDiv.appendChild(miniHand);
 
     // UNO status (no numeric card counts)
     if (player.cardCount === 1) {
@@ -595,6 +753,32 @@ function renderTurnOrder(state) {
   otherPlayers.appendChild(orderRow);
 }
 
+function createMiniHandEl(cardCount) {
+  const miniHand = document.createElement('div');
+  miniHand.className = 'mini-hand';
+
+  const safeCount = Number.isFinite(cardCount) && cardCount > 0 ? cardCount : 0;
+  const maxVisible = 10;
+  const visible = Math.min(safeCount, maxVisible);
+  miniHand.style.setProperty('--count', String(visible));
+
+  for (let i = 0; i < visible; i++) {
+    const back = document.createElement('div');
+    back.className = 'mini-card-back';
+    back.style.setProperty('--i', String(i));
+    miniHand.appendChild(back);
+  }
+
+  if (safeCount > maxVisible) {
+    const more = document.createElement('div');
+    more.className = 'mini-more';
+    more.textContent = `+${safeCount - maxVisible}`;
+    miniHand.appendChild(more);
+  }
+
+  return miniHand;
+}
+
 function canSayUnoNow() {
   if (!Array.isArray(gameState.currentHand)) return false;
   if (gameState.currentHand.length === 1) return true;
@@ -608,7 +792,23 @@ function updateActionButtons() {
 
   if (drawCardBtn) {
     drawCardBtn.disabled = !gameState.isMyTurn;
-    drawCardBtn.textContent = gameState.canPassAfterDraw ? 'Pass' : 'Draw Card';
+    if (gameState.canPassAfterDraw) {
+      drawCardBtn.textContent = 'Pass';
+    } else if (gameState.isMyTurn && gameState.drawStackCount && gameState.drawStackCount > 0) {
+      // Only show the explicit "End Turn" wording when the player actually has a choice
+      // to stack (+2/+4). If they can't stack, it's just a forced penalty draw.
+      const hand = Array.isArray(gameState.currentHand) ? gameState.currentHand : [];
+      const t = gameState.drawStackType;
+      const canStack = t
+        ? hand.some(c => c && c.value === t)
+        : hand.some(c => c && (c.value === '+2' || c.value === '+4'));
+
+      drawCardBtn.textContent = canStack
+        ? `End Turn (Draw ${gameState.drawStackCount})`
+        : `Draw ${gameState.drawStackCount}`;
+    } else {
+      drawCardBtn.textContent = 'Draw Card';
+    }
   }
 }
 
@@ -652,6 +852,15 @@ function renderPlayerHand(state) {
     // Check if card is playable
     if (state && state.topCard) {
       let isPlayable = canPlayCard(card, state.topCard, state.currentColor);
+
+      // If there is a draw stack pending, you may only respond with the SAME draw card type.
+      if (gameState.isMyTurn && state && state.drawStackCount && state.drawStackCount > 0) {
+        if (state.drawStackType) {
+          isPlayable = card && card.value === state.drawStackType;
+        } else {
+          isPlayable = card && (card.value === '+2' || card.value === '+4');
+        }
+      }
 
       // If we drew a playable card this turn, only the drawn card may be played.
       if (gameState.canPassAfterDraw && typeof gameState.drawnCardIndex === 'number') {
@@ -701,6 +910,8 @@ function getCardDisplay(card) {
       return { main: 'SKIP', sub: '⊘', corner: '⊘' };
     case 'reverse':
       return { main: 'REV', sub: '⇄', corner: '⇄' };
+    case 'flip':
+      return { main: 'FLIP', sub: '↻', corner: '↻' };
     default:
       return { main: String(card.value), sub: String(card.value), corner: String(card.value) };
   }
@@ -725,12 +936,8 @@ function playCard(index, card) {
     showNotification("It's not your turn!", 'warning');
     return;
   }
-  
-  // Add playing animation
-  const cardElement = playerHand.children[index];
-  if (cardElement) {
-    cardElement.classList.add('playing');
-  }
+
+  const cardElement = playerHand && playerHand.children ? playerHand.children[index] : null;
   
   // If it's a wild card, show color picker
   if (card.color === 'wild') {
@@ -738,11 +945,84 @@ function playCard(index, card) {
     colorPickerModal.classList.add('show');
     return;
   }
-  
-  // Play the card with animation delay
-  setTimeout(() => {
+
+  // Smoothly animate hand -> discard pile, then emit.
+  animateCardFlight({
+    fromEl: cardElement,
+    toEl: discardPile,
+    card,
+    durationMs: 360,
+    rotateDeg: 12,
+    hideFromEl: true
+  }).finally(() => {
     socket.emit('playCard', { cardIndex: index });
-  }, 200);
+  });
+}
+
+function animateCardFlight({ fromEl, toEl, card, durationMs = 380, rotateDeg = 0, hideFromEl = false }) {
+  try {
+    if (!fromEl || !toEl || !document.body) return Promise.resolve();
+
+    const fromRect = fromEl.getBoundingClientRect();
+    const toRect = toEl.getBoundingClientRect();
+    if (!fromRect || !toRect) return Promise.resolve();
+
+    // Build a flying element:
+    // - If we know the card, show its face.
+    // - If we don't (other players drawing), show a generic UNO back.
+    let flight;
+    if (card) {
+      flight = document.createElement('div');
+      const colorClass = card.color === 'wild' ? 'black' : (card.color || 'black');
+      flight.className = `uno-card ${colorClass} card-flight`;
+      flight.innerHTML = createCardHTML(card);
+    } else {
+      flight = document.createElement('div');
+      flight.className = 'card-back card-flight';
+      flight.textContent = 'UNO';
+    }
+
+    flight.style.width = `${fromRect.width}px`;
+    flight.style.height = `${fromRect.height}px`;
+    flight.style.left = `${fromRect.left}px`;
+    flight.style.top = `${fromRect.top}px`;
+
+    document.body.appendChild(flight);
+
+    // Hide the original element during the flight so it doesn't look duplicated.
+    const prevVisibility = fromEl.style.visibility;
+    if (hideFromEl) {
+      fromEl.style.visibility = 'hidden';
+    }
+
+    const dx = toRect.left - fromRect.left;
+    const dy = toRect.top - fromRect.top;
+    const sx = toRect.width / fromRect.width;
+    const sy = toRect.height / fromRect.height;
+
+    const animation = flight.animate(
+      [
+        { transform: 'translate(0px, 0px) scale(1, 1) rotate(0deg)', opacity: 1 },
+        { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy}) rotate(${rotateDeg}deg)`, opacity: 1 }
+      ],
+      {
+        duration: durationMs,
+        easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+        fill: 'forwards'
+      }
+    );
+
+    return animation.finished
+      .catch(() => {})
+      .finally(() => {
+        flight.remove();
+        if (hideFromEl) {
+          fromEl.style.visibility = prevVisibility;
+        }
+      });
+  } catch (e) {
+    return Promise.resolve();
+  }
 }
 
 function displayGameOver(loser, stats) {
@@ -754,23 +1034,45 @@ function displayGameOver(loser, stats) {
       <p class="loser-announcement">${loserName} is the LOSER! 😅</p>
       <p class="winner-announcement">Everyone else WINS! 🏆</p>
       ${Array.isArray(stats) ? `<p>Safe players: ${stats.map(p => p.name).join(', ')}</p>` : ''}
+      <p id="rematchVoteStatus" style="opacity:0.85; margin-top:10px;">Rematch votes: --/--</p>
     </div>
   `;
   
   gameOverModal.classList.add('show');
+
+  // Reset local vote state for this game-over screen
+  gameState.rematch.voted = false;
+  updateRematchUI();
   
   // Create confetti effect
   createConfetti();
 }
 
+function updateRematchUI() {
+  if (!playAgainBtn) return;
+
+  // Button label
+  playAgainBtn.textContent = gameState.rematch.voted ? 'Voted ✅' : 'Vote Rematch';
+  playAgainBtn.disabled = !!gameState.rematch.voted;
+
+  // Status text inside modal (if present)
+  const statusEl = document.getElementById('rematchVoteStatus');
+  if (statusEl) {
+    const v = typeof gameState.rematch.votes === 'number' ? gameState.rematch.votes : 0;
+    const t = typeof gameState.rematch.total === 'number' ? gameState.rematch.total : 0;
+    statusEl.textContent = t > 0 ? `Rematch votes: ${v}/${t}` : 'Rematch votes: --/--';
+  }
+}
+
 function getSelectedSettings() {
   const stackPlusTwoFour = document.getElementById('stackPlusTwoFour');
   const sevenZeroRule = document.getElementById('sevenZeroRule');
-  const jumpInRule = document.getElementById('jumpInRule');
+  const gameMode = document.getElementById('gameMode');
   return {
+    gameMode: gameMode ? (gameMode.value || 'classic') : 'classic',
     stackPlusTwoFour: !!(stackPlusTwoFour && stackPlusTwoFour.checked),
     sevenZeroRule: !!(sevenZeroRule && sevenZeroRule.checked),
-    jumpInRule: !!(jumpInRule && jumpInRule.checked)
+    // jump-in removed
   };
 }
 

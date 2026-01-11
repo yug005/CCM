@@ -10,6 +10,7 @@ class Game {
     this.currentPlayerIndex = 0;
     this.direction = 1; // 1 = clockwise, -1 = counter-clockwise
     this.currentColor = null;
+    this.currentSide = 'light'; // for UNO Flip mode
     this.hasStarted = false;
     this.isGameOver = false;
     this.loser = null;
@@ -18,10 +19,14 @@ class Game {
     this.settings = {
       stackPlusTwoFour: settings.stackPlusTwoFour || false,
       sevenZeroRule: settings.sevenZeroRule || false,
-      jumpInRule: settings.jumpInRule || false,
+      gameMode: settings.gameMode || 'classic',
       turnTimer: settings.turnTimer || 0, // 0 = no timer
       ...settings
     };
+
+    // Draw stack state when stacking +2/+4 is enabled
+    // { count: number, lastValue: '+2' | '+4' }
+    this.drawStack = null;
     
     // UNO tracking
     this.unoCalled = new Set(); // Players who properly called UNO for their current 1-card state
@@ -29,6 +34,51 @@ class Game {
 
     // Draw-then-play flow (UNO rule): after drawing, you may play ONLY the drawn card (if playable) or pass.
     this.pendingDraw = null; // { playerId, cardIndex, canPlay }
+  }
+
+  playerCanRespondToDrawStack(player) {
+    if (!player || !this.drawStack || !this.settings.stackPlusTwoFour) return false;
+    const needed = this.drawStack.lastValue;
+    if (!needed) return false;
+    return player.hand.some(c => {
+      const f = this.getActiveCardFace(c);
+      return f && f.value === needed;
+    });
+  }
+
+  // If a draw stack is pending and the current player cannot stack, auto-draw the penalty and
+  // advance the turn. Returns an effect payload for UI animations.
+  autoResolveDrawStackIfForced() {
+    if (!this.drawStack || !this.settings.stackPlusTwoFour) return null;
+
+    const current = this.getCurrentPlayer();
+    if (!current) return null;
+
+    if (this.playerCanRespondToDrawStack(current)) {
+      // Player has a choice: stack or accept by drawing.
+      return null;
+    }
+
+    const count = this.drawStack.count || 0;
+    const lastValue = this.drawStack.lastValue;
+    if (count <= 0) {
+      this.drawStack = null;
+      return null;
+    }
+
+    this.drawCardsForPlayer(current, count);
+    this.drawStack = null;
+    this.pendingDraw = null;
+
+    // Taking the penalty ends the turn.
+    this.nextPlayer();
+
+    return {
+      playerId: current.id,
+      playerName: current.name,
+      count,
+      reason: lastValue || 'stack-penalty'
+    };
   }
 
   updateUnoStateForPlayer(player) {
@@ -54,8 +104,37 @@ class Game {
       id: playerId,
       name: playerName,
       hand: [],
-      isSafe: false
+      isSafe: false,
+      wins: 0
     });
+  }
+
+  // Start a new round while keeping the same room + players.
+  restartRound() {
+    if (this.players.length < 2) throw new Error('Need at least 2 players');
+
+    // Reset round state (preserve players + wins)
+    this.safePlayers = [];
+    this.deck = [];
+    this.discardPile = [];
+    this.currentPlayerIndex = 0;
+    this.direction = 1;
+    this.currentColor = null;
+    this.hasStarted = false;
+    this.isGameOver = false;
+    this.loser = null;
+
+    this.unoCalled = new Set();
+    this.unoVulnerable = new Set();
+    this.pendingDraw = null;
+
+    this.players.forEach(p => {
+      p.hand = [];
+      p.isSafe = false;
+    });
+
+    // Reuse normal start flow
+    this.startGame();
   }
 
   // Remove player from game
@@ -72,7 +151,60 @@ class Game {
   // Initialize deck
   initializeDeck() {
     this.deck = [];
+    const mode = this.settings.gameMode || 'classic';
     const colors = ['red', 'blue', 'green', 'yellow'];
+
+    // UNO Flip: use two-sided cards (light/dark) and include flip action cards.
+    if (mode === 'flip') {
+      const darkColorMap = {
+        red: 'pink',
+        blue: 'teal',
+        green: 'purple',
+        yellow: 'orange'
+      };
+
+      const pushFlipCard = (lightCard) => {
+        const darkCard = {
+          ...lightCard,
+          color: darkColorMap[lightCard.color] || lightCard.color
+        };
+        this.deck.push({ light: lightCard, dark: darkCard });
+      };
+
+      // Numbers 0-9 (mirror on dark side for now)
+      colors.forEach(color => {
+        pushFlipCard({ color, value: '0', type: 'number' });
+        for (let i = 1; i <= 9; i++) {
+          pushFlipCard({ color, value: i.toString(), type: 'number' });
+          pushFlipCard({ color, value: i.toString(), type: 'number' });
+        }
+      });
+
+      // Action cards (Skip, Reverse, +2, Flip)
+      colors.forEach(color => {
+        for (let i = 0; i < 2; i++) {
+          pushFlipCard({ color, value: 'skip', type: 'action' });
+          pushFlipCard({ color, value: 'reverse', type: 'action' });
+          pushFlipCard({ color, value: '+2', type: 'action' });
+          pushFlipCard({ color, value: 'flip', type: 'action' });
+        }
+      });
+
+      // Wild cards
+      for (let i = 0; i < 4; i++) {
+        this.deck.push({
+          light: { color: 'wild', value: 'wild', type: 'wild' },
+          dark: { color: 'wild', value: 'wild', type: 'wild' }
+        });
+        this.deck.push({
+          light: { color: 'wild', value: '+4', type: 'wild' },
+          dark: { color: 'wild', value: '+4', type: 'wild' }
+        });
+      }
+
+      this.shuffleDeck();
+      return;
+    }
     
     // Number cards (0-9)
     colors.forEach(color => {
@@ -122,20 +254,23 @@ class Game {
     let firstCard;
     do {
       firstCard = this.deck.pop();
-    } while (firstCard.value === '+4');
+    } while (this.getActiveCardFace(firstCard).value === '+4');
     
     this.discardPile.push(firstCard);
-    this.currentColor = firstCard.color === 'wild' ? 'red' : firstCard.color;
+    const firstFace = this.getActiveCardFace(firstCard);
+    this.currentColor = firstFace.color === 'wild' ? 'red' : firstFace.color;
     
     // Handle first card effects
-    if (firstCard.value === 'skip') {
+    if (firstFace.value === 'skip') {
       this.nextPlayer();
-    } else if (firstCard.value === 'reverse') {
+    } else if (firstFace.value === 'reverse') {
       this.direction *= -1;
-    } else if (firstCard.value === '+2') {
+    } else if (firstFace.value === '+2') {
       const nextPlayer = this.getNextPlayer();
       this.drawCardsForPlayer(nextPlayer, 2);
       this.nextPlayer();
+    } else if (firstFace.value === 'flip' && (this.settings.gameMode || 'classic') === 'flip') {
+      this.flipSide();
     }
   }
 
@@ -187,16 +322,33 @@ class Game {
     // UNO call/vulnerability is tracked by hand-size transitions.
   }
 
+  getActiveCardFace(card) {
+    const mode = this.settings.gameMode || 'classic';
+    if (mode !== 'flip') return card;
+    if (!card) return card;
+    return card[this.currentSide] || card.light || card.dark;
+  }
+
   // Check if card can be played
   canPlayCard(card, currentCard) {
-    if (card.type === 'wild') return true;
-    if (card.color === this.currentColor) return true;
-    if (card.value === currentCard.value) return true;
+    const face = this.getActiveCardFace(card);
+    const currentFace = this.getActiveCardFace(currentCard);
+    if (!face || !currentFace) return false;
+
+    // If stacking is active, only +2/+4 may be played to continue the stack.
+    if (this.drawStack && this.settings.stackPlusTwoFour) {
+      // Enforce same-type stacking: +2 stacks with +2, +4 stacks with +4.
+      return face.value === this.drawStack.lastValue;
+    }
+
+    if (face.type === 'wild') return true;
+    if (face.color === this.currentColor) return true;
+    if (face.value === currentFace.value) return true;
     return false;
   }
 
   // Play a card
-  playCard(playerId, cardIndex, chosenColor = null) {
+  playCard(playerId, cardIndex, chosenColor = null, extra = {}) {
     const currentPlayer = this.getCurrentPlayer();
     
     if (!currentPlayer || currentPlayer.id !== playerId) {
@@ -209,6 +361,8 @@ class Game {
     if (!card) throw new Error('Invalid card');
     
     const currentCard = this.discardPile[this.discardPile.length - 1];
+    const cardFace = this.getActiveCardFace(card);
+    const currentFace = this.getActiveCardFace(currentCard);
 
     // If the player drew this turn and the drawn card is playable, they may only play that drawn card (or pass).
     if (this.pendingDraw && this.pendingDraw.playerId === playerId) {
@@ -219,22 +373,42 @@ class Game {
       this.pendingDraw = null;
     }
     
+    // If a draw stack is active, you may only respond with +2/+4.
+    if (this.drawStack && this.settings.stackPlusTwoFour) {
+      if (!(cardFace.value === '+2' || cardFace.value === '+4')) {
+        throw new Error('You must stack the same draw card or draw the penalty');
+      }
+      if (this.drawStack.lastValue && cardFace.value !== this.drawStack.lastValue) {
+        throw new Error(`You must stack ${this.drawStack.lastValue} or draw the penalty`);
+      }
+    }
+
     if (!this.canPlayCard(card, currentCard)) {
       throw new Error('Cannot play this card');
     }
     
     // Validate Wild +4 (can only be played if no other valid card)
-    if (card.value === '+4') {
-      const hasValidCard = player.hand.some((c, i) => 
-        i !== cardIndex && this.canPlayCard(c, currentCard) && c.value !== '+4'
-      );
+    if (cardFace.value === '+4') {
+      // When stacking is active and we're responding to a +4 stack, allow +4 regardless
+      // of whether other playable cards exist (house rule stacking behavior).
+      const isRespondingToPlusFourStack =
+        this.drawStack && this.settings.stackPlusTwoFour && this.drawStack.lastValue === '+4';
+      if (isRespondingToPlusFourStack) {
+        // no-op
+      } else {
+      const hasValidCard = player.hand.some((c, i) => {
+        if (i === cardIndex) return false;
+        const f = this.getActiveCardFace(c);
+        return this.canPlayCard(c, currentCard) && f && f.value !== '+4';
+      });
       if (hasValidCard) {
         throw new Error('Cannot play Wild +4 when you have a valid card');
+      }
       }
     }
     
     // Wild cards require color choice
-    if (card.type === 'wild' && !chosenColor) {
+    if (cardFace.type === 'wild' && !chosenColor) {
       throw new Error('Must choose a color for wild card');
     }
     
@@ -243,14 +417,14 @@ class Game {
     this.discardPile.push(card);
     
     // Set current color
-    if (card.type === 'wild') {
+    if (cardFace.type === 'wild') {
       this.currentColor = chosenColor;
     } else {
-      this.currentColor = card.color;
+      this.currentColor = cardFace.color;
     }
     
-    // Handle card effects
-    this.handleCardEffect(card, player);
+    // Handle card effects (and how many turns to advance)
+    const { effect, advanceBy } = this.handleCardEffect(card, player, extra);
 
     // If the player now has exactly 1 card, they must have called UNO earlier (at 2 cards)
     // or they become challengeable.
@@ -274,14 +448,29 @@ class Game {
       this.updateUnoStateForPlayer(player);
     }
     
-    // Move to next player
-    this.nextPlayer();
+    // Move to next player (some effects advance an extra step)
+    const steps = typeof advanceBy === 'number' ? advanceBy : 1;
+    for (let i = 0; i < steps; i++) {
+      this.nextPlayer();
+    }
+
+    // If stacking is enabled and the next player cannot respond to the stack,
+    // auto-apply the penalty draw and advance again.
+    if (this.drawStack && this.settings.stackPlusTwoFour) {
+      const autoDrawn = this.autoResolveDrawStackIfForced();
+      if (autoDrawn) {
+        // Ensure effect is always an object when we append.
+        const base = effect && typeof effect === 'object' ? effect : {};
+        base.autoDrawn = autoDrawn;
+      }
+    }
     
     // Check if game is over
     const gameStatus = this.checkGameStatus();
     
     return {
       cardPlayed: card,
+      effect,
       playerSafe,
       gameOver: gameStatus.isGameOver,
       loser: gameStatus.loser,
@@ -290,44 +479,113 @@ class Game {
   }
 
   // Handle card effects
-  handleCardEffect(card, player) {
+  handleCardEffect(card, player, extra = {}) {
     const nextPlayer = this.getNextPlayer();
+    const effect = {};
+    let advanceBy = 1;
+    const face = this.getActiveCardFace(card);
     
-    switch (card.value) {
+    switch (face.value) {
       case 'skip':
-        this.nextPlayer(); // Skip the next player
+        // Skip the next player (advance two turns total)
+        advanceBy = 2;
         break;
         
       case 'reverse':
         if (this.players.filter(p => !p.isSafe).length === 2) {
           // With 2 players, reverse acts like skip
-          this.nextPlayer();
+          advanceBy = 2;
         } else {
           this.direction *= -1;
         }
         break;
         
       case '+2':
-        this.drawCardsForPlayer(nextPlayer, 2);
-        this.nextPlayer(); // Next player loses turn
+        if (this.settings.stackPlusTwoFour) {
+          const prev = this.drawStack && this.drawStack.lastValue === '+2' ? this.drawStack.count : 0;
+          this.drawStack = { count: prev + 2, lastValue: '+2' };
+          effect.drawStack = { count: this.drawStack.count };
+          // Let next player respond to the stack
+          advanceBy = 1;
+        } else {
+          this.drawCardsForPlayer(nextPlayer, 2);
+          effect.drawn = { playerId: nextPlayer.id, playerName: nextPlayer.name, count: 2, reason: '+2' };
+          // Next player loses turn
+          advanceBy = 2;
+        }
         break;
         
       case '+4':
-        this.drawCardsForPlayer(nextPlayer, 4);
-        this.nextPlayer(); // Next player loses turn
+        if (this.settings.stackPlusTwoFour) {
+          const prev = this.drawStack && this.drawStack.lastValue === '+4' ? this.drawStack.count : 0;
+          this.drawStack = { count: prev + 4, lastValue: '+4' };
+          effect.drawStack = { count: this.drawStack.count };
+          // Let next player respond to the stack
+          advanceBy = 1;
+        } else {
+          this.drawCardsForPlayer(nextPlayer, 4);
+          effect.drawn = { playerId: nextPlayer.id, playerName: nextPlayer.name, count: 4, reason: '+4' };
+          // Next player loses turn
+          advanceBy = 2;
+        }
+        break;
+
+      case 'flip':
+        if ((this.settings.gameMode || 'classic') === 'flip') {
+          this.flipSide();
+          effect.flipped = { side: this.currentSide };
+        }
         break;
         
       case '7':
         if (this.settings.sevenZeroRule) {
-          // TODO: Implement swap hands logic
+          // Simplified: swap hands with next active player
+          const other = nextPlayer;
+          const tmp = player.hand;
+          player.hand = other.hand;
+          other.hand = tmp;
+          effect.swap = { a: player.id, b: other.id };
         }
         break;
         
       case '0':
         if (this.settings.sevenZeroRule) {
-          // TODO: Implement rotate hands logic
+          // Rotate all active players' hands in the current direction
+          const active = this.players.filter(p => !p.isSafe);
+          if (active.length >= 2) {
+            const hands = active.map(p => p.hand);
+            if (this.direction === 1) {
+              // clockwise: each gets previous player's hand
+              for (let i = 0; i < active.length; i++) {
+                active[(i + 1) % active.length].hand = hands[i];
+              }
+            } else {
+              // counter-clockwise
+              for (let i = 0; i < active.length; i++) {
+                active[(i - 1 + active.length) % active.length].hand = hands[i];
+              }
+            }
+            effect.rotate = true;
+          }
         }
         break;
+    }
+
+    return {
+      effect: Object.keys(effect).length ? effect : null,
+      advanceBy
+    };
+  }
+
+  flipSide() {
+    this.currentSide = this.currentSide === 'light' ? 'dark' : 'light';
+    const top = this.discardPile[this.discardPile.length - 1];
+    const topFace = this.getActiveCardFace(top);
+    if (topFace && topFace.type === 'wild') {
+      // keep chosen color if it matches; otherwise default
+      if (!this.currentColor) this.currentColor = 'red';
+    } else if (topFace) {
+      this.currentColor = topFace.color;
     }
   }
 
@@ -362,7 +620,20 @@ class Game {
 
     const currentCard = this.discardPile[this.discardPile.length - 1];
 
-    // House rule requested: only draw if you have no playable card.
+    // If stacking is active, drawing means taking the full penalty.
+    if (this.drawStack && this.settings.stackPlusTwoFour) {
+      const count = this.drawStack.count || 0;
+      if (count <= 0) {
+        this.drawStack = null;
+      } else {
+        this.drawCardsForPlayer(player, count);
+        this.drawStack = null;
+        this.nextPlayer();
+        return { drawnCount: count, reason: 'stack-penalty', turnContinues: false };
+      }
+    }
+
+    // House rule: only draw if you have no playable card.
     const hasPlayableCard = player.hand.some(c => this.canPlayCard(c, currentCard));
     if (hasPlayableCard) {
       throw new Error('You have a playable card. You cannot draw');
@@ -385,13 +656,13 @@ class Game {
 
     if (canPlayDrawnCard) {
       this.pendingDraw = { playerId, cardIndex: drawnCardIndex, canPlay: true };
-      return { drawnCard, drawnCardIndex, canPlayDrawnCard: true, turnContinues: true };
+      return { drawnCard, drawnCardIndex, drawnCount: 1, canPlayDrawnCard: true, turnContinues: true };
     }
 
     // If the drawn card cannot be played, the turn ends immediately.
     this.pendingDraw = null;
     this.nextPlayer();
-    return { drawnCard, drawnCardIndex, canPlayDrawnCard: false, turnContinues: false };
+    return { drawnCard, drawnCardIndex, drawnCount: 1, canPlayDrawnCard: false, turnContinues: false };
   }
 
   // Pass after drawing a playable card (keep it and end turn)
@@ -474,11 +745,21 @@ class Game {
     const activePlayers = this.players.filter(p => !p.isSafe);
     
     if (activePlayers.length === 1) {
-      this.isGameOver = true;
-      this.loser = { 
-        id: activePlayers[0].id, 
-        name: activePlayers[0].name 
-      };
+      if (!this.isGameOver) {
+        this.isGameOver = true;
+        this.loser = {
+          id: activePlayers[0].id,
+          name: activePlayers[0].name
+        };
+
+        // Award wins to everyone except the loser (i.e., players who became safe).
+        const winnerIds = new Set(this.safePlayers.map(p => p.id));
+        this.players.forEach(p => {
+          if (winnerIds.has(p.id)) {
+            p.wins = (typeof p.wins === 'number' ? p.wins : 0) + 1;
+          }
+        });
+      }
       return {
         isGameOver: true,
         loser: this.loser,
@@ -492,7 +773,8 @@ class Game {
   // Get game state (filtered per player)
   getGameState() {
     const currentPlayer = this.getCurrentPlayer();
-    const topCard = this.discardPile[this.discardPile.length - 1];
+    const topCardRaw = this.discardPile[this.discardPile.length - 1];
+    const topCard = this.getActiveCardFace(topCardRaw);
     
     return {
       roomCode: this.roomCode,
@@ -501,15 +783,19 @@ class Game {
       loser: this.loser,
       currentPlayerId: currentPlayer ? currentPlayer.id : null,
       currentColor: this.currentColor,
+      currentSide: this.currentSide,
       direction: this.direction,
       topCard: topCard,
       deckSize: this.deck.length,
+      drawStackCount: this.drawStack && this.settings.stackPlusTwoFour ? this.drawStack.count : 0,
+      drawStackType: this.drawStack && this.settings.stackPlusTwoFour ? this.drawStack.lastValue : null,
       players: this.players.map(p => ({
         id: p.id,
         name: p.name,
         cardCount: p.hand.length,
         isSafe: p.isSafe,
-        hasCalledUno: this.unoCalled.has(p.id)
+        hasCalledUno: this.unoCalled.has(p.id),
+        wins: typeof p.wins === 'number' ? p.wins : 0
       })),
       safePlayers: this.safePlayers,
       settings: this.settings
@@ -519,7 +805,9 @@ class Game {
   // Get player's hand (only for specific player)
   getPlayerHand(playerId) {
     const player = this.players.find(p => p.id === playerId);
-    return player ? player.hand : [];
+    if (!player) return [];
+    if ((this.settings.gameMode || 'classic') !== 'flip') return player.hand;
+    return player.hand.map(c => this.getActiveCardFace(c));
   }
 }
 

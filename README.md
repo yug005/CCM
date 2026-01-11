@@ -1,6 +1,6 @@
-# 🎴 UNO Multiplayer - Play with Friends Online!
+# 🎴 Multiplayer Card Game (UNO-style)
 
-A real-time multiplayer UNO card game built with Node.js, Socket.IO, and vanilla JavaScript. Play with 2-6 friends using room codes!
+A real-time multiplayer UNO-style card game built with Node.js, Socket.IO, and vanilla JavaScript. Play with 2-6 friends using room codes!
 
 ## ✨ Features
 
@@ -170,6 +170,7 @@ uno/
 - `createRoom` - Create new game room
 - `joinRoom` - Join existing room
 - `startGame` - Start the game
+- `playAgain` - Vote for rematch (starts when all players vote)
 - `playCard` - Play a card
 - `drawCard` - Draw from deck
 - `sayUno` - Call UNO
@@ -181,11 +182,20 @@ uno/
 - `gameState` - Full game state update
 - `playerHand` - Player's cards (private)
 - `gameStarted` - Game has begun
+- `roundRestarted` - New round started in same room
 - `cardPlayed` - Card was played
-- `cardDrawn` - Card was drawn
+- `cardsDrawn` - Cards were drawn (count included)
+- `rematchVoteUpdate` - Rematch vote count update
 - `playerSafe` - Player finished their cards
 - `gameOver` - Game ended
 - `error` - Error message
+
+## 📜 License & IP note
+
+This repository is licensed under the MIT License (see LICENSE).
+
+Important: MIT only covers *this code*. It does not grant rights to third-party trademarks/brands.
+"UNO" is a trademark of its respective owner. This project is an unaffiliated, fan-made implementation.
 
 ### Game State Schema
 ```javascript

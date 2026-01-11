@@ -9,6 +9,10 @@
   --color-blue: #3498db;
   --color-green: #2ecc71;
   --color-yellow: #f39c12;
+  --color-pink: #ff4fb1;
+  --color-teal: #00c2c7;
+  --color-purple: #8e44ad;
+  --color-orange: #ff7a18;
   --color-wild: linear-gradient(135deg, var(--color-red) 25%, var(--color-blue) 25%, var(--color-blue) 50%, var(--color-green) 50%, var(--color-green) 75%, var(--color-yellow) 75%);
   --color-dark: #2c3e50;
   --color-light: #ecf0f1;
@@ -237,6 +241,23 @@ body {
   color: white;
   font-size: 16px;
   transition: all 0.3s;
+}
+
+.form-group select {
+  width: 100%;
+  padding: 12px 15px;
+  border: 2px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.05);
+  color: white;
+  font-size: 16px;
+  transition: all 0.3s;
+}
+
+.form-group select:focus {
+  outline: none;
+  border-color: var(--color-blue);
+  background: rgba(255,255,255,0.1);
 }
 
 .form-group input:focus {
@@ -546,21 +567,25 @@ body {
 }
 
 .other-player {
-  background: rgba(255,255,255,0.1);
-  border-radius: 10px;
-  padding: 10px 15px;
-  min-width: 120px;
+  background: transparent;
+  border-radius: 12px;
+  padding: 0;
+  min-width: 0;
   text-align: center;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
 }
 
 .other-player.me {
-  border: 2px solid rgba(255,255,255,0.35);
+  border: none;
 }
 
 .other-player.active-turn {
-  border: 3px solid var(--color-yellow);
-  animation: glow 1s infinite;
+  border: none;
+  animation: none;
 }
 
 @keyframes glow {
@@ -570,18 +595,88 @@ body {
 
 .other-player.safe {
   opacity: 0.5;
-  border: 2px solid var(--color-green);
+  border: none;
 }
 
 .other-player .player-name {
   font-weight: 600;
-  margin-bottom: 5px;
+  margin-bottom: 0;
   font-size: 14px;
+  opacity: 0.9;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wins-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  color: rgba(255,255,255,0.92);
+  background: rgba(243, 156, 18, 0.18);
+  border: 1px solid rgba(243, 156, 18, 0.35);
+}
+
+.other-player.active-turn .mini-hand {
+  filter: drop-shadow(0 0 10px rgba(243, 156, 18, 0.75));
+}
+
+.other-player.me .mini-hand {
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.35));
 }
 
 .other-player .card-count {
   font-size: 24px;
   color: var(--color-yellow);
+}
+
+/* Face-down cards preview for other players */
+.other-player .mini-hand {
+  --count: 0;
+  position: relative;
+  height: 34px;
+  width: calc((min(10, var(--count)) * 6px) + 22px);
+  margin: 6px auto 0;
+}
+
+.other-player .mini-card-back {
+  position: absolute;
+  top: 0;
+  left: calc(var(--i) * 6px);
+  width: 22px;
+  height: 32px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #0f1419 0%, #2c3e50 100%);
+  border: 2px solid rgba(255,255,255,0.65);
+  box-shadow: 0 3px 6px rgba(0,0,0,0.35);
+  transform: rotate(calc((var(--i) * 2deg) - 8deg));
+}
+
+.other-player .mini-card-back::after {
+  content: 'UNO';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.6px;
+  color: rgba(255,255,255,0.85);
+  opacity: 0.7;
+}
+
+.other-player .mini-more {
+  position: absolute;
+  top: 6px;
+  right: -26px;
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.8);
 }
 
 .other-player .uno-badge {
@@ -667,6 +762,14 @@ body {
   overflow: hidden;
 }
 
+.discard-pile .discard-top {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .card-back::before {
   content: '';
   position: absolute;
@@ -706,6 +809,8 @@ body {
   font-size: 20px;
   color: white;
   box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+  position: relative;
+  overflow: hidden;
 }
 
 .current-color-indicator {
@@ -916,10 +1021,25 @@ body {
   }
 }
 
+/* Flying card overlay used for smooth transitions between piles/hand */
+.card-flight {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 99999;
+  pointer-events: none;
+  margin: 0;
+}
+
+
 .uno-card.red { background: var(--color-red); color: white; }
 .uno-card.blue { background: var(--color-blue); color: white; }
 .uno-card.green { background: var(--color-green); color: white; }
 .uno-card.yellow { background: var(--color-yellow); color: white; }
+.uno-card.pink { background: var(--color-pink); color: white; }
+.uno-card.teal { background: var(--color-teal); color: white; }
+.uno-card.purple { background: var(--color-purple); color: white; }
+.uno-card.orange { background: var(--color-orange); color: white; }
 .uno-card.black { 
   background: linear-gradient(135deg, var(--color-red) 25%, var(--color-blue) 25%, var(--color-blue) 50%, var(--color-green) 50%, var(--color-green) 75%, var(--color-yellow) 75%);
   color: white;
@@ -930,6 +1050,12 @@ body {
   color: white;
   text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
 }
+
+/* Current color indicator for additional colors */
+.color-indicator.pink { background: var(--color-pink); }
+.color-indicator.teal { background: var(--color-teal); }
+.color-indicator.purple { background: var(--color-purple); }
+.color-indicator.orange { background: var(--color-orange); }
 
 .uno-card .card-value {
   font-size: 26px;
@@ -957,12 +1083,14 @@ body {
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0,0,0,0.85);
-  backdrop-filter: blur(8px);
+  /* Keep the table/hand visible while choosing a color */
+  background: rgba(0,0,0,0.25);
+  backdrop-filter: blur(2px);
   z-index: 1000;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   animation: fadeIn 0.3s;
+  padding-top: 70px;
 }
 
 .modal.show {
@@ -980,7 +1108,7 @@ body {
 
 .modal-content {
   background: linear-gradient(135deg, var(--color-card-bg) 0%, #1a2332 100%);
-  padding: 40px 35px;
+  padding: 28px 24px;
   border-radius: 20px;
   max-width: 450px;
   width: 90%;
@@ -988,6 +1116,17 @@ body {
   animation: slideInScale 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 20px 60px rgba(0,0,0,0.5);
   border: 2px solid rgba(255,255,255,0.1);
+}
+
+/* Highlight when a player draws */
+.other-player.draw-highlight .mini-hand {
+  animation: mini-hand-pop 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes mini-hand-pop {
+  0% { transform: scale(1); filter: drop-shadow(0 0 0 rgba(52,152,219,0)); }
+  40% { transform: scale(1.07); filter: drop-shadow(0 0 14px rgba(52,152,219,0.55)); }
+  100% { transform: scale(1); filter: drop-shadow(0 0 0 rgba(52,152,219,0)); }
 }
 
 @keyframes slideInScale {
