@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
+const fs = require('fs');
 const Game = require('./gameLogic');
 
 const app = express();
@@ -32,7 +33,15 @@ function adminHttpGuard(req, res, next) {
 
 // Developer dashboard (served only when ADMIN_TOKEN is configured)
 app.get('/admin', adminHttpGuard, (req, res) => {
-  res.sendFile(path.join(__dirname, 'admin', 'admin.html'));
+  const token = (req.query && req.query.token) || '';
+  const htmlPath = path.join(__dirname, 'admin', 'admin.html');
+  try {
+    const html = fs.readFileSync(htmlPath, 'utf8');
+    res.setHeader('content-type', 'text/html; charset=utf-8');
+    res.send(html.replaceAll('__ADMIN_TOKEN__', String(token)));
+  } catch (e) {
+    res.status(500).send('Admin UI failed to load');
+  }
 });
 app.get('/admin/admin.js', adminHttpGuard, (req, res) => {
   res.sendFile(path.join(__dirname, 'admin', 'admin.js'));
