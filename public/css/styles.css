@@ -206,7 +206,9 @@ body::after {
 }
 
 /* Home screen: overall page polish (layout + spacing) */
-#homeScreen {
+/* Only apply the grid layout while Home is the active screen.
+   (If we set #homeScreen display unconditionally, it overrides .screen { display: none; }.) */
+#homeScreen.screen.active {
   display: grid;
   gap: 14px;
   padding-bottom: 22px;

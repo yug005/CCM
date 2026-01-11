@@ -1062,7 +1062,7 @@ function displayGameOver(loser, stats) {
   
   gameOverContent.innerHTML = `
     <div class="game-over-stats">
-      <p class="loser-announcement">${loserName} is the LOSER! 😅</p>
+      <p class="loser-announcement">${loserName} loses but we all know tanisha is the real looser 😅</p>
       <p class="winner-announcement">Everyone else WINS! 🏆</p>
       ${Array.isArray(stats) ? `<p>Safe players: ${stats.map(p => p.name).join(', ')}</p>` : ''}
       <p id="rematchVoteStatus" style="opacity:0.85; margin-top:10px;">Rematch votes: --/--</p>
