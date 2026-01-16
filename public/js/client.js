@@ -38,6 +38,7 @@ gameState.drawnCardIndex = null;
 let homeScreen, lobbyScreen, gameScreen, errorMessage;
 let playerNameInput, roomCodeInput, createRoomBtn, joinRoomBtn;
 let displayRoomCode, gameRoomCode, copyCodeBtn, playersList, startGameBtn, leaveLobbyBtn;
+let shareLinkBtn, shareLinkSmallBtn;
 let hostControls, lockLobbyBtn, lobbyLockStatus;
 let seerPanel, seerPanelBody;
 let otherPlayers, deckPile, discardPile, colorIndicator, turnIndicator, playerHand, deckCount, drawCardBtn, callClashBtn;
@@ -87,6 +88,8 @@ document.addEventListener('DOMContentLoaded', function() {
   displayRoomCode = document.getElementById('displayRoomCode');
   gameRoomCode = document.getElementById('gameRoomCode');
   copyCodeBtn = document.getElementById('copyCodeBtn');
+  shareLinkBtn = document.getElementById('shareLinkBtn');
+  shareLinkSmallBtn = document.getElementById('shareLinkSmallBtn');
   playersList = document.getElementById('playersList');
   startGameBtn = document.getElementById('startGameBtn');
   leaveLobbyBtn = document.getElementById('leaveLobbyBtn');
@@ -120,6 +123,9 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   
   attachEventListeners();
+
+  // If someone opens a shared link like https://site/?room=ABC123, pre-fill the code.
+  prefillRoomCodeFromUrl();
 
   // Hide deck remaining count display (per UX request)
   if (deckCount && deckCount.parentElement) {
@@ -160,10 +166,33 @@ function attachEventListeners() {
   // Copy room code
   copyCodeBtn.addEventListener('click', () => {
     const code = displayRoomCode.textContent;
-    navigator.clipboard.writeText(code).then(() => {
-      showNotification('Room code copied!', 'success');
-    });
+    copyTextToClipboard(code)
+      .then(() => showNotification('Room code copied!', 'success'))
+      .catch(() => showNotification('Could not copy code', 'error'));
   });
+
+  // Share room link
+  if (shareLinkBtn) {
+    shareLinkBtn.addEventListener('click', () => {
+      const roomCode = (displayRoomCode && displayRoomCode.textContent ? displayRoomCode.textContent : '').trim().toUpperCase();
+      if (!roomCode || roomCode.length !== 6) {
+        showNotification('Room code not available yet', 'warning');
+        return;
+      }
+      shareRoomJoinLink(roomCode);
+    });
+  }
+
+  if (shareLinkSmallBtn) {
+    shareLinkSmallBtn.addEventListener('click', () => {
+      const roomCode = (gameState && gameState.roomCode ? String(gameState.roomCode) : '').trim().toUpperCase();
+      if (!roomCode || roomCode.length !== 6) {
+        showNotification('Room code not available yet', 'warning');
+        return;
+      }
+      shareRoomJoinLink(roomCode);
+    });
+  }
   
   // Start game
   startGameBtn.addEventListener('click', () => {
@@ -305,6 +334,97 @@ function attachEventListeners() {
   }
   
   console.log('All event listeners attached');
+}
+
+function buildRoomJoinUrl(roomCode) {
+  const code = (roomCode || '').toString().trim().toUpperCase();
+  const url = new URL(window.location.href);
+  url.searchParams.set('room', code);
+  return url.toString();
+}
+
+async function copyTextToClipboard(text) {
+  const value = (text || '').toString();
+
+  // Preferred Clipboard API (requires HTTPS/secure context in most browsers)
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    return navigator.clipboard.writeText(value);
+  }
+
+  // Fallback: temporary textarea + execCommand
+  return new Promise((resolve, reject) => {
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const ok = document.execCommand('copy');
+      textarea.remove();
+      if (ok) resolve();
+      else reject(new Error('copy_failed'));
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+async function shareRoomJoinLink(roomCode) {
+  const url = buildRoomJoinUrl(roomCode);
+  const title = 'Color Clash room';
+  const text = `Join my room: ${roomCode}`;
+
+  // If Web Share API is available (mostly mobile), use it.
+  if (navigator.share && typeof navigator.share === 'function') {
+    try {
+      await navigator.share({ title, text, url });
+      return;
+    } catch (_) {
+      // User cancelled or share failed; fall back to copying.
+    }
+  }
+
+  try {
+    await copyTextToClipboard(url);
+    showNotification('Join link copied!', 'success');
+  } catch (_) {
+    showNotification('Could not copy join link', 'error');
+  }
+}
+
+function prefillRoomCodeFromUrl() {
+  if (!roomCodeInput) return;
+
+  let code = '';
+  try {
+    const url = new URL(window.location.href);
+    code = (url.searchParams.get('room') || url.searchParams.get('code') || '').trim();
+
+    // Also support hash links like #room=ABC123
+    if (!code && url.hash) {
+      const hash = url.hash.replace(/^#/, '');
+      const params = new URLSearchParams(hash);
+      code = (params.get('room') || params.get('code') || '').trim();
+    }
+  } catch (_) {
+    // ignore
+  }
+
+  if (!code) return;
+
+  const normalized = code.replace(/[^a-z0-9]/gi, '').toUpperCase();
+  if (normalized.length !== 6) return;
+
+  roomCodeInput.value = normalized;
+  showNotification('Room code filled from link', 'info');
+
+  // Optional: focus name field to make joining faster.
+  if (playerNameInput && !playerNameInput.value.trim()) {
+    playerNameInput.focus();
+  }
 }
 
 // Socket event handlers
