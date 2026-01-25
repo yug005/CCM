@@ -452,7 +452,7 @@ io.on('connection', (socket) => {
     // Seer accounts (name joined with ** suffix) cannot be kicked by the host.
     const targetInfo = players.get(playerId);
     if (targetInfo && targetInfo.isSeer) {
-      socket.emit('gameError', { message: 'you cant kick your papa' });
+      socket.emit('gameError', { message: 'you cant kick admin' });
       return;
     }
 
