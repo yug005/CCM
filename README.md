@@ -143,5 +143,3 @@ MIT — see `LICENSE`.
 - GitHub: [yug005](https://github.com/yug005)
 
 ---
-
-Would you like a focused unit-test scaffold for `gameLogic.js` or a small Render deployment guide next?
