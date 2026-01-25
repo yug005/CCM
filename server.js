@@ -13,6 +13,8 @@ const io = socketIo(server, {
     methods: ['GET', 'POST']
   }
 });
+// Optional: require auth helper
+const auth = require('./auth');
 
 // Admin token for developer-only controls (optional)
 // Set on Render as an env var: ADMIN_TOKEN=some-long-secret
@@ -52,6 +54,50 @@ app.get('/admin/admin.css', adminHttpGuard, (req, res) => {
 
 // Serve static files (game UI)
 app.use(express.static('public'));
+
+// JSON body parsing for auth endpoints
+app.use(express.json());
+
+// Minimal Auth endpoints
+app.post('/api/register', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'missing_fields' });
+  try {
+    const user = await auth.createUser(String(username).trim(), String(password));
+    const token = auth.issueToken(user);
+    return res.json({ ok: true, token, user: { id: user.id, username: user.username, wins: user.wins, matches_played: user.matches_played } });
+  } catch (e) {
+    if (e && e.message === 'username_taken') return res.status(409).json({ error: 'username_taken' });
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'missing_fields' });
+  try {
+    const user = await auth.findUserByUsername(String(username).trim());
+    if (!user) return res.status(401).json({ error: 'invalid_credentials' });
+    const ok = await auth.verifyPassword(user, String(password));
+    if (!ok) return res.status(401).json({ error: 'invalid_credentials' });
+    const token = auth.issueToken(user);
+    return res.json({ ok: true, token, user: { id: user.id, username: user.username, wins: user.wins, matches_played: user.matches_played } });
+  } catch (e) {
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.get('/api/me', async (req, res) => {
+  const authHeader = req.get('authorization') || '';
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') return res.status(401).json({ error: 'unauthorized' });
+  const token = parts[1];
+  const v = auth.verifyToken(token);
+  if (!v || !v.sub) return res.status(401).json({ error: 'unauthorized' });
+  const user = await auth.getUserById(v.sub);
+  if (!user) return res.status(404).json({ error: 'not_found' });
+  return res.json({ ok: true, user: { id: user.id, username: user.username, wins: user.wins, matches_played: user.matches_played } });
+});
 
 // In-memory storage
 const rooms = new Map(); // roomCode -> Game instance
@@ -233,6 +279,25 @@ function generateRoomCode() {
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
 
+  // Attach auth info if provided via handshake
+  try {
+    const token = socket.handshake && socket.handshake.auth && socket.handshake.auth.token;
+    if (token) {
+      const verified = auth.verifyToken(token);
+      if (verified && verified.sub) {
+        socket.data = socket.data || {};
+        socket.data.user = { id: verified.sub, username: verified.username };
+        console.log('Socket authenticated as user:', verified.username);
+      }
+    }
+
+    const guestId = socket.handshake && socket.handshake.auth && socket.handshake.auth.guestId;
+    if (!socket.data) socket.data = {};
+    socket.data.guestId = guestId || socket.data.guestId || null;
+  } catch (e) {
+    // ignore auth parse errors
+  }
+
   function isHost(game) {
     return !!game && !!game.hostId && game.hostId === socket.id;
   }
@@ -333,7 +398,25 @@ io.on('connection', (socket) => {
       socket.emit('gameError', { message: 'Room is full' });
       return;
     }
-    
+
+    // Prevent the same authenticated user from joining the same room multiple times
+    try {
+      if (socket.data && socket.data.user && socket.data.user.id) {
+        const authId = socket.data.user.id;
+        const already = (game.players || []).some(p => {
+          const s = io.sockets.sockets.get(p.id);
+          return s && s.data && s.data.user && s.data.user.id === authId;
+        });
+        if (already) {
+          socket.emit('gameError', { message: 'This account is already in the room' });
+          return;
+        }
+      }
+    } catch (e) {
+      // non-fatal, continue to join
+      console.warn('Error checking duplicate auth join:', e && e.message);
+    }
+
     players.set(socket.id, { roomCode, playerName: cleanName, isSeer: parsed.isSeer });
     socket.join(roomCode);
     game.addPlayer(socket.id, cleanName);
@@ -588,7 +671,7 @@ io.on('connection', (socket) => {
   });
 
   // Play a card
-  socket.on('playCard', ({ cardIndex, chosenColor }) => {
+  socket.on('playCard', async ({ cardIndex, chosenColor }) => {
     const playerData = players.get(socket.id);
     if (!playerData) return;
     
@@ -655,6 +738,27 @@ io.on('connection', (socket) => {
           loser: result.loser,
           safePlayers: result.safePlayers
         });
+        // Persist stats for logged-in users (simple counters)
+        try {
+          const tasks = [];
+          (result.safePlayers || []).forEach(p => {
+            const sock = io.sockets.sockets.get(p.id);
+            if (sock && sock.data && sock.data.user && sock.data.user.id) {
+              tasks.push(auth.incrementStats(sock.data.user.id, { wins: 1, matches: 1 }));
+            }
+          });
+
+          if (result.loser && result.loser.id) {
+            const loserSock = io.sockets.sockets.get(result.loser.id);
+            if (loserSock && loserSock.data && loserSock.data.user && loserSock.data.user.id) {
+              tasks.push(auth.incrementStats(loserSock.data.user.id, { matches: 1 }));
+            }
+          }
+
+          if (tasks.length) await Promise.all(tasks);
+        } catch (e) {
+          console.error('Failed to persist stats:', e && e.message);
+        }
       }
       
     } catch (error) {

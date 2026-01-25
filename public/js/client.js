@@ -1,15 +1,28 @@
 // Client-side Socket.IO logic
 console.log('Client script loaded');
 
-const socket = io(window.SOCKET_SERVER_URL || undefined);
+// Create socket with auth (token + guestId) where available
+let socket;
+function createSocket() {
+  const token = localStorage.getItem('ccm_token') || '';
+  let guestId = localStorage.getItem('ccm_guestId');
+  if (!guestId) {
+    guestId = 'g_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
+    localStorage.setItem('ccm_guestId', guestId);
+  }
 
-socket.on('connect', () => {
-  console.log('Connected to server:', socket.id);
-});
+  socket = io(window.SOCKET_SERVER_URL || undefined, { auth: { token: token, guestId } });
 
-socket.on('connect_error', (error) => {
-  console.error('Connection error:', error);
-});
+  socket.on('connect', () => {
+    console.log('Connected to server:', socket.id);
+  });
+
+  socket.on('connect_error', (error) => {
+    console.error('Connection error:', error);
+  });
+}
+
+createSocket();
 
 // Game state
 let gameState = {
@@ -35,9 +48,11 @@ gameState.canPassAfterDraw = false;
 gameState.drawnCardIndex = null;
 
 // DOM elements - initialized after DOM loads
-let homeScreen, lobbyScreen, gameScreen, errorMessage;
+let homeScreen, lobbyScreen, gameScreen, errorMessage, header;
+  let loginBtn, logoutBtn, authModal, authForm, authTitle, authToggle, authMessage, authCancel;
 let playerNameInput, roomCodeInput, createRoomBtn, joinRoomBtn;
 let displayRoomCode, gameRoomCode, copyCodeBtn, playersList, startGameBtn, leaveLobbyBtn;
+let statWins, statMatches, userStats;
 let shareLinkBtn, shareLinkSmallBtn;
 let hostControls, lockLobbyBtn, lobbyLockStatus;
 let seerPanel, seerPanelBody;
@@ -84,6 +99,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
   gameModeSelect = document.getElementById('gameMode');
   gameModeHint = document.getElementById('gameModeHint');
+  header = document.querySelector('.header');
+  loginBtn = document.getElementById('loginBtn');
+  logoutBtn = document.getElementById('logoutBtn');
+  authModal = document.getElementById('authModal');
+  authForm = document.getElementById('authForm');
+  authTitle = document.getElementById('authTitle');
+  authToggle = document.getElementById('authToggle');
+  authMessage = document.getElementById('authMessage');
+  authCancel = document.getElementById('authCancel');
+  statWins = document.getElementById('statWins');
+  statMatches = document.getElementById('statMatches');
+  userStats = document.getElementById('userStats');
   
   displayRoomCode = document.getElementById('displayRoomCode');
   gameRoomCode = document.getElementById('gameRoomCode');
@@ -313,6 +340,53 @@ function attachEventListeners() {
     });
   }
 
+  // Auth UI
+  if (loginBtn) loginBtn.addEventListener('click', () => showAuthModal('login'));
+  if (logoutBtn) logoutBtn.addEventListener('click', () => doLogout());
+  if (authCancel) authCancel.addEventListener('click', () => hideAuthModal());
+  if (authToggle) authToggle.addEventListener('click', (e) => {
+    e.preventDefault();
+    const isLogin = authTitle.textContent === 'Log in';
+    showAuthModal(isLogin ? 'register' : 'login');
+  });
+
+  if (authForm) {
+    authForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('authUsername').value.trim();
+      const password = document.getElementById('authPassword').value;
+      const mode = authTitle.textContent === 'Log in' ? 'login' : 'register';
+      authMessage.textContent = '';
+      try {
+        const res = await fetch(`/api/${mode}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          authMessage.textContent = body && body.error ? String(body.error) : 'Failed';
+          return;
+        }
+        if (body && body.token) {
+          localStorage.setItem('ccm_token', body.token);
+          // Reconnect socket with token (preserve guestId)
+          const guestId = localStorage.getItem('ccm_guestId') || '';
+          socket.auth = { token: body.token, guestId };
+          try { socket.disconnect(); } catch (_) {}
+          try { socket.connect(); } catch (_) {}
+
+          updateAuthUI(true, body.user && body.user.username);
+          hideAuthModal();
+        }
+      } catch (err) {
+        authMessage.textContent = 'Network error';
+      }
+    });
+  }
+
+  // Initialize auth UI state
+  initAuthState();
+
   // Game mode toggles whether variations are shown/used.
   if (gameModeSelect && settingsToggle && settingsPanel) {
     const applyModeUI = () => {
@@ -334,6 +408,81 @@ function attachEventListeners() {
   }
   
   console.log('All event listeners attached');
+}
+
+function initAuthState() {
+  const token = localStorage.getItem('ccm_token');
+  if (token) {
+    // try to fetch /api/me to validate
+    fetch('/api/me', { headers: { 'authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(b => {
+        if (b && b.ok && b.user) updateAuthUI(true, b.user.username);
+        else updateAuthUI(false);
+      })
+      .catch(() => updateAuthUI(false));
+  } else updateAuthUI(false);
+}
+
+function updateAuthUI(loggedIn, username) {
+  if (loggedIn) {
+    if (loginBtn) loginBtn.style.display = 'none';
+    if (logoutBtn) { logoutBtn.style.display = 'inline-block'; logoutBtn.textContent = `Log out (${username || 'You'})`; }
+    // show stats (will be filled by fetch)
+    if (userStats) userStats.style.display = 'block';
+    fetchAndShowStats();
+  } else {
+    if (loginBtn) loginBtn.style.display = 'inline-block';
+    if (logoutBtn) logoutBtn.style.display = 'none';
+    localStorage.removeItem('ccm_token');
+    if (userStats) userStats.style.display = 'none';
+    // Reset socket auth to guest only
+    const guestId = localStorage.getItem('ccm_guestId') || '';
+    if (socket) {
+      socket.auth = { token: '', guestId };
+      try { socket.disconnect(); } catch (_) {}
+      try { socket.connect(); } catch (_) {}
+    }
+  }
+}
+
+function fetchAndShowStats() {
+  const token = localStorage.getItem('ccm_token');
+  if (!token) return;
+  fetch('/api/me', { headers: { 'authorization': `Bearer ${token}` } })
+    .then(r => r.json())
+    .then(b => {
+      if (b && b.ok && b.user) {
+        const w = typeof b.user.wins === 'number' ? b.user.wins : (b.user.wins || 0);
+        const m = typeof b.user.matches_played === 'number' ? b.user.matches_played : (b.user.matches_played || 0);
+        if (statWins) statWins.textContent = String(w);
+        if (statMatches) statMatches.textContent = String(m);
+        if (userStats) userStats.style.display = 'block';
+      } else {
+        if (userStats) userStats.style.display = 'none';
+      }
+    })
+    .catch(() => {
+      if (userStats) userStats.style.display = 'none';
+    });
+}
+
+function showAuthModal(mode) {
+  if (!authModal) return;
+  authTitle.textContent = mode === 'login' ? 'Log in' : 'Register';
+  authToggle.textContent = mode === 'login' ? 'Need an account? Register' : 'Have an account? Log in';
+  authMessage.textContent = '';
+  authModal.classList.add('show');
+}
+
+function hideAuthModal() {
+  if (!authModal) return;
+  authModal.classList.remove('show');
+}
+
+function doLogout() {
+  localStorage.removeItem('ccm_token');
+  initAuthState();
 }
 
 function buildRoomJoinUrl(roomCode) {
@@ -692,6 +841,8 @@ socket.on('playerSafe', ({ playerId, playerName }) => {
 
 socket.on('gameOver', ({ loser, safePlayers }) => {
   displayGameOver(loser, safePlayers);
+  // If logged-in, refresh stats (server may have updated them)
+  fetchAndShowStats();
 });
 
 socket.on('playerLeft', ({ playerId, playerName }) => {
@@ -751,10 +902,14 @@ function showScreen(screenId) {
   homeScreen.classList.remove('active');
   lobbyScreen.classList.remove('active');
   gameScreen.classList.remove('active');
-  
   if (screenId === 'homeScreen') homeScreen.classList.add('active');
   if (screenId === 'lobbyScreen') lobbyScreen.classList.add('active');
   if (screenId === 'gameScreen') gameScreen.classList.add('active');
+
+  // Show header prominently on home and lobby; hide only on game screen.
+  if (header) {
+    header.style.display = (screenId === 'gameScreen') ? 'none' : 'block';
+  }
 }
 
 function showError(message) {

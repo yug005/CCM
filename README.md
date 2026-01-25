@@ -122,6 +122,50 @@ Uses nodemon for auto-reload on file changes.
 PORT=3000  # Server port (automatically set by most platforms)
 ```
 
+### Optional: Postgres-backed Auth & Stats
+
+- This project supports an optional Postgres database for user accounts and persistent stats. If `DATABASE_URL` is not set, the server will continue using a file-backed `users.json` store (no DB required).
+
+- To enable Postgres persistence, set `DATABASE_URL` in your environment BEFORE first start. The server will automatically create a `users` table if needed.
+
+- Important: enabling Postgres does NOT automatically migrate existing `users.json`. If you have existing users you want to keep, either:
+   - Keep using the file-backed store (do not set `DATABASE_URL`), or
+   - Export/import users.json into Postgres (see migration notes below).
+
+Required production env vars when enabling DB or auth features:
+```bash
+DATABASE_URL=postgres://user:pass@host:5432/dbname
+JWT_SECRET=some_long_random_secret
+ADMIN_TOKEN=optional_admin_token
+```
+
+Deployment checklist when using Postgres:
+- Add the env vars above in your hosting provider (Render, Railway, Heroku, Docker, etc.).
+- Deploy the code (commit & push) and restart the service. On first run the `users` table will be created automatically.
+
+Migration note (optional):
+- If you want to migrate `users.json` into Postgres, I can add a one-time import script that reads `users.json` and inserts rows into the `users` table while preserving password hashes. Without doing that, existing users remain only in `users.json` and are not visible to the DB-backed mode.
+
+## 🔁 Deploy Steps (quick)
+
+1) Commit & push your changes:
+```bash
+git add -A
+git commit -m "Optional auth + DB support and UI fixes"
+git push origin main
+```
+
+2) On your production host, pull & install:
+```bash
+git pull
+npm install --production
+```
+
+3) Ensure required env vars are set (see above), then restart your process manager (systemd, pm2, Docker container, etc.).
+
+4) Verify logs and test register/login flow and a completed match to see stats increment.
+
+
 ## 📁 Project Structure
 
 ```

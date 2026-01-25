@@ -1491,6 +1491,68 @@ body::after {
   color: var(--color-yellow);
 }
 
+/* Header layout: keep title left and auth buttons right on wide screens */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 24px;
+}
+
+.header-left {
+  text-align: left;
+}
+
+.header-right {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Auth modal tweaks */
+#authModal .modal-content {
+  max-width: 420px;
+  padding: 20px;
+}
+
+#authForm .form-group input {
+  padding: 10px 12px;
+}
+
+/* Stack auth modal action buttons vertically to avoid overlap */
+#authModal .button-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+#authModal .button-group .btn {
+  width: 100%;
+}
+
+#authMessage {
+  min-height: 18px;
+  color: var(--color-yellow);
+  opacity: 0.95;
+}
+
+@media (max-width: 680px) {
+  .header { flex-direction: column; text-align: center; gap: 12px; }
+  .header-right { margin-top: 6px; }
+}
+
+.user-stats {
+  font-size: 13px;
+  line-height: 1;
+  color: var(--color-light);
+  min-width: 96px;
+}
+
+.user-stats strong {
+  color: var(--color-yellow);
+}
+
 /* Color picker */
 .color-picker {
   display: grid;

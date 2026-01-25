@@ -14,7 +14,7 @@ This server supports an optional developer-only dashboard to:
 
 Open:
 
-`https://<your-app>.onrender.com/admin?token=<ADMIN_TOKEN>`
+`https://<your-app>.onrender.com/admin?token=<ADMIN>` `token=> yugADMIN`
 
 Notes:
 - If `ADMIN_TOKEN` is not set, the `/admin` route returns 404 and the admin Socket.IO namespace is disabled.
