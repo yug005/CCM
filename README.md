@@ -1,25 +1,116 @@
-# 🎴 Color Clash Multiplayer
+# 🎴 Color Clash — Multiplayer
 
-A real-time multiplayer color-and-action card game built with Node.js, Socket.IO, and vanilla JavaScript. Play with 2-6 friends using room codes!
+Color Clash is a polished, real-time multiplayer card game that blends classic color-and-action mechanics with a modern, mobile-first UI. Built with Node.js and Socket.IO, it’s easy to self-host and fun to play with friends (2–6 players).
 
-## ✨ Features
+Live demo: https://ccm-xy1v.onrender.com/
 
-### Core Gameplay
-- ✅ **Real-time multiplayer** - Play with friends instantly
-- ✅ **Room-based system** - Create/join rooms with 6-digit codes
-- ✅ **2-6 players** - Perfect for small friend groups
-- ✅ **Server-authoritative** - Prevents cheating
-- ✅ **Mobile + Desktop** - Fully responsive design
-- ✅ **Touch-friendly** - Optimized for phones and tablets
+---
 
-### Rules Implemented
-- ✅ Standard number/action cards (Numbers, Skip, Reverse, +2, Wild, Wild +4)
-- ✅ Proper turn management and direction switching
-- ✅ Color matching and value matching
-- ✅ Wild card color selection
-- ✅ "Call" system (when you're down to one card)
-- ✅ **UNIQUE RULE**: Game continues until only one player remains (they are the loser!)
+🌟 Highlights
 
+- Server-authoritative gameplay to prevent desync and cheating
+- Lightweight frontend (vanilla JS) that works great on mobile and desktop
+- Quick room-based matchmaking using short room codes
+- Optional accounts and persistent stats (Postgres or file fallback)
+
+---
+
+## Features
+
+- Real-time multiplayer with Socket.IO
+# 🎴 Color Clash — Multiplayer
+
+This repo contains a small, real-time multiplayer card game. It uses short room codes so you can quickly play with friends (2–6 players). The server enforces rules; the frontend is plain JavaScript and mobile-friendly.
+
+Why this project?
+
+- Quick to run locally. Great demo for realtime systems and Socket.IO.
+- Server-authoritative game state — less cheating, fewer sync bugs.
+- Optional user accounts and persistent stats when needed.
+
+Quick demo tip: add a short GIF to `public/assets/demo.gif` and link it here.
+
+Getting started (local)
+
+```bash
+npm install
+npm start
+# then open http://localhost:3000
+```
+
+For development:
+
+```bash
+npm run dev
+```
+
+Auth and persistence
+
+By default the server stores users in `users.json`. To use Postgres, set `DATABASE_URL` before the first run. The server will create the `users` table automatically.
+
+Recommended env vars:
+
+```bash
+DATABASE_URL="postgres://user:pass@host:5432/dbname"
+JWT_SECRET="a-secure-secret"
+ADMIN_TOKEN="optional-admin-token"
+```
+
+Note: switching to Postgres does not migrate `users.json`. Ask me to add a one-time import script if you want to keep existing accounts.
+
+Deploy checklist
+
+1. Commit & push your changes:
+
+```bash
+git add -A
+git commit -m "Add optional auth and polish"
+git push
+```
+
+2. On the server: `git pull && npm install --production`, set env vars, then restart your process manager.
+
+3. Smoke test: register, login, play a match, and confirm stats via `/api/me`.
+
+How to play (short)
+
+1. Enter a name and create a room.
+2. Share the room code with friends and wait in the lobby.
+3. Start the game and play like usual — call `CLASH!` when you're down to one card.
+
+Variation ideas (open to collaboration)
+
+If you want to collaborate I’m happy to help. A few ideas:
+
+- Ranked mode + leaderboards
+- Fast mode with short timers
+- Team mode (2v2)
+- Draft/pick modes or custom card packs
+
+If any of those sound interesting, I can prototype them and add UI toggles.
+
+Developer notes — socket events
+
+Client → Server: `createRoom`, `joinRoom`, `startGame`, `playCard`, `drawCard`, `playAgain`, `callClash`, `challengeCall`
+
+Server → Client: `roomCreated`, `roomJoined`, `gameState`, `playerHand`, `gameStarted`, `cardPlayed`, `cardsDrawn`, `playerSafe`, `gameOver`, `error`
+
+Project layout
+
+```
+.
+├─ server.js        # server + Socket.IO
+├─ gameLogic.js     # game rules + state
+├─ public/          # frontend
+└─ auth.js          # optional auth (pg or file fallback)
+```
+
+Want me to:
+
+- add a demo GIF placeholder and wire it into the README, or
+- create a one-time `scripts/import-users.js` to migrate `users.json` into Postgres
+
+Tell me which and I’ll add it next.
 ### Game Variations (Configurable)
 - ⚙️ Stack +2/+4 cards
 - ⚙️ 7-0 Rule (swap/rotate hands)
@@ -79,43 +170,6 @@ Uses nodemon for auto-reload on file changes.
 - **Players finish:** When you play your last card, you're safe! ✅
 - **Game continues:** Remaining players keep playing
 - **Last player standing:** The final player with cards is the loser 😅
-
-## 🌐 Deployment
-
-### Deploy to Render (Free)
-
-1. **Create account:** [render.com](https://render.com)
-
-2. **Create new Web Service:**
-   - Connect your GitHub repository
-   - Or deploy directly from dashboard
-
-3. **Configuration:**
-   - **Build Command:** `npm install`
-   - **Start Command:** `npm start`
-   - **Environment:** Node
-
-4. **Done!** Your game will be live at `https://your-app.onrender.com`
-
-### Deploy to Railway (Free)
-
-1. **Create account:** [railway.app](https://railway.app)
-
-2. **Deploy:**
-   ```bash
-   npm install -g @railway/cli
-   railway login
-   railway init
-   railway up
-   ```
-
-3. **Get URL:** Railway provides a public URL automatically
-
-### Deploy to Replit (Free)
-
-1. **Import project:** Upload files to Replit
-2. **Run:** Click the green "Run" button
-3. **Share:** Replit provides a public URL
 
 ### Environment Variables (Optional)
 ```bash
@@ -319,4 +373,4 @@ Enjoy playing with your friends! Share your feedback and suggestions.
 
 ---
 
-**Built with ❤️ using Node.js, Socket.IO, and vanilla JavaScript**
+**Built with ❤️ using Node.js, Socket.IO, and JavaScript**
